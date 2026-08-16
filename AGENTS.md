@@ -33,8 +33,9 @@ Excel format or storage model without explicit approval and a migration plan.
 - Money is stored as integer cents. Do not persist floating-point currency.
 - Account balances must include only expenses belonging to that account.
 - Date period boundaries are inclusive and use the user's local calendar.
-- Excel import must validate ArkMoney's workbook structure before writing data.
-- Import and export changes require round-trip tests, including special text.
+- Excel import is not user-facing in 0.2.0. Retained importer code must validate
+  ArkMoney's workbook structure before any future database write.
+- Importer and export changes require format tests, including special text.
 - Deleting an expense must also remove its private photo when appropriate.
 
 ## Verification
@@ -78,8 +79,9 @@ must never be combined with instrumentation on a personal-data installation.
   установке.
 - Деньги хранятся только в целых копейках. Перевод не является доходом или
   расходом и должен атомарно учитывать оба счёта.
-- Изменения Room требуют явной миграции; изменения Excel — обратных тестов и
-  проверки ошибочных файлов.
+- Изменения Room требуют явной миграции; изменения экспорта и сохранённого кода
+  импортера — тестов формата и проверки ошибочных файлов. В версии 0.2.0 импорт
+  не показывается пользователю.
 - Перед передачей изменений выполните `./gradlew testDebugUnitTest lintDebug
   assembleDebug` и точно сообщите результат.
 - Не добавляйте в Git ключи, базы, экспорты, фотографии, резервные копии и

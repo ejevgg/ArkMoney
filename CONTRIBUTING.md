@@ -26,7 +26,8 @@ ArkMoney data. Use an isolated emulator or test-only installation.
 - explain behavior before and after the change;
 - include reproduction steps for bug fixes;
 - attach redacted screenshots for visual changes;
-- add or update tests when financial, import or persistence logic changes;
+- add or update tests when financial, persistence, export, or retained importer
+  logic changes; import is not currently exposed in the application UI;
 - do not commit APK files, signing keys, device backups, Excel exports, local
   databases, receipt photos or personal financial data.
 
@@ -45,5 +46,6 @@ ArkMoney data. Use an isolated emulator or test-only installation.
 ```
 
 В pull request опишите поведение до и после изменения, добавьте обезличенные
-скриншоты интерфейса и тесты для финансовой логики, импорта и хранения. Не
+скриншоты интерфейса и тесты для финансовой логики, хранения, экспорта и
+сохранённого кода импортера. Импорт сейчас не показывается в интерфейсе. Не
 добавляйте APK, ключи, базы, резервные копии и персональные данные.
