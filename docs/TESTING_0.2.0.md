@@ -1,12 +1,12 @@
-# ArkMoney 0.2.0 release-candidate testing / Тестирование кандидата ArkMoney 0.2.0
+# ArkMoney 0.2.0 release testing / Тестирование ArkMoney 0.2.0
 
-This checklist covers the manual checks required before publishing 0.2.0. Test the signed RC over the public 0.1.0 build; do not uninstall the application first. Export a backup before starting.
+This checklist covers the manual checks required for 0.2.0. Test the signed 0.2.0 build over the public 0.1.0 build; do not uninstall the application first. Export a backup before starting.
 
-Этот чек-лист содержит ручные проверки перед публикацией 0.2.0. Устанавливайте подписанный RC поверх публичной версии 0.1.0, не удаляя приложение. Перед началом сделайте экспорт данных.
+Этот чек-лист содержит ручные проверки версии 0.2.0. Устанавливайте подписанную версию 0.2.0 поверх публичной версии 0.1.0, не удаляя приложение. Перед началом сделайте экспорт данных.
 
 ## Upgrade and data safety / Обновление и сохранность данных
 
-- [ ] Install RC over 0.1.0 without clearing application data. / Установить RC поверх 0.1.0 без очистки данных.
+- [ ] Install 0.2.0 over 0.1.0 without clearing application data. / Установить 0.2.0 поверх 0.1.0 без очистки данных.
 - [ ] Existing accounts, categories, operations, balances, names, dates, and photos remain intact. / Проверить сохранность счетов, категорий, операций, балансов, названий, дат и фотографий.
 - [ ] Open every main page once and restart the application. / Открыть все основные страницы и перезапустить приложение.
 

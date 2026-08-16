@@ -2,7 +2,7 @@
 
 All notable changes to ArkMoney are documented in this file.
 
-## 0.2.0 — Unreleased / Не выпущено
+## 0.2.0 — 2026-08-16
 
 ### Added / Добавлено
 
