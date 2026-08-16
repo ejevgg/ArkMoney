@@ -5,7 +5,7 @@ import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.temporal.TemporalAdjusters
 
-enum class AnalyticsPeriod(val title: String) { WEEK("Неделя"), MONTH("Месяц"), QUARTER("3 месяца"), YEAR("Год") }
+enum class AnalyticsPeriod(val title: String) { WEEK("Неделя"), MONTH("Месяц"), QUARTER("3 месяца"), YEAR("Год"), CUSTOM("Период") }
 
 data class DateRange(val start: LocalDate, val endInclusive: LocalDate) {
     init { require(!endInclusive.isBefore(start)) }
@@ -26,6 +26,7 @@ fun AnalyticsPeriod.range(anchor: LocalDate): DateRange = when (this) {
         DateRange(start, start.plusMonths(3).minusDays(1))
     }
     AnalyticsPeriod.YEAR -> DateRange(LocalDate.of(anchor.year, 1, 1), LocalDate.of(anchor.year, 12, 31))
+    AnalyticsPeriod.CUSTOM -> DateRange(anchor, anchor)
 }
 
 fun AnalyticsPeriod.shift(anchor: LocalDate, amount: Long): LocalDate = when (this) {
@@ -33,6 +34,7 @@ fun AnalyticsPeriod.shift(anchor: LocalDate, amount: Long): LocalDate = when (th
     AnalyticsPeriod.MONTH -> anchor.plusMonths(amount)
     AnalyticsPeriod.QUARTER -> anchor.plusMonths(amount * 3)
     AnalyticsPeriod.YEAR -> anchor.plusYears(amount)
+    AnalyticsPeriod.CUSTOM -> anchor
 }
 
 fun List<Expense>.inRange(range: DateRange): List<Expense> = filter {

@@ -32,7 +32,9 @@ import com.arkulz.arkmoney.data.ArkMoneyDatabase
 import com.arkulz.arkmoney.data.Category
 import com.arkulz.arkmoney.data.DemoDataGenerator
 import com.arkulz.arkmoney.data.Expense
-import com.arkulz.arkmoney.data.ImportedWorkbook
+import com.arkulz.arkmoney.data.TransactionType
+import com.arkulz.arkmoney.data.transactionType
+import java.io.File
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -67,7 +69,7 @@ private fun ArkMoneyApp() {
         Scaffold(
             bottomBar = {
                 NavigationBar {
-                    NavigationBarItem(page == AppPage.EXPENSES, { page = AppPage.EXPENSES }, { Icon(Icons.AutoMirrored.Filled.List, null) }, label = { Text("Расходы") })
+                    NavigationBarItem(page == AppPage.EXPENSES, { page = AppPage.EXPENSES }, { Icon(Icons.AutoMirrored.Filled.List, null) }, label = { Text("Финансы") })
                     NavigationBarItem(page == AppPage.ANALYTICS, { page = AppPage.ANALYTICS }, { Icon(Icons.Default.Star, null) }, label = { Text("Аналитика") })
                     NavigationBarItem(page == AppPage.SETTINGS, { page = AppPage.SETTINGS }, { Icon(Icons.Default.Settings, null) }, label = { Text("Настройки") })
                 }
@@ -81,11 +83,12 @@ private fun ArkMoneyApp() {
                     accounts = accounts,
                     selectedAccount = selectedAccount,
                     onAccountSelected = { selectedAccountId = it.id },
-                    onAddExpense = { cents, category, title, createdAt ->
+                    onAddExpense = { cents, category, title, createdAt, type, transferAccountId ->
                         val account = selectedAccount ?: return@ExpensesScreen
-                        scope.launch { dao.insert(Expense(amountCents = cents, category = category.name, categoryId = category.id, accountId = account.id, title = title, createdAt = createdAt)) }
+                        scope.launch { dao.insert(Expense(amountCents = cents, category = category?.name.orEmpty(), categoryId = category?.id ?: 0, accountId = account.id, title = title.ifBlank { if (type == TransactionType.TRANSFER) "Перевод" else "" }, createdAt = createdAt, type = type.name, transferAccountId = transferAccountId)) }
                     },
                     onUpdateExpense = { expense -> scope.launch { dao.updateExpense(expense) } },
+                    onDeleteExpense = { expense -> scope.launch { database.withTransaction { dao.deleteExpense(expense.id) }; if (expense.photoPath.isNotBlank()) File(expense.photoPath).delete() } },
                 )
                 AppPage.ANALYTICS -> AnalyticsScreen(Modifier.padding(padding), expenses, categories)
                 AppPage.SETTINGS -> SettingsScreen(
@@ -98,18 +101,21 @@ private fun ArkMoneyApp() {
                         themeMode = it
                         preferences.edit { putString("theme", it.name) }
                     },
-                    onAddCategory = { name, emoji -> scope.launch { dao.insertCategory(Category(name = name, emoji = emoji, sortOrder = categories.size)) } },
+                    onAddCategory = { name, emoji, type -> scope.launch { dao.insertCategory(Category(name = name, emoji = emoji, sortOrder = categories.count { it.type == type.name }, type = type.name)) } },
                     onUpdateCategory = { scope.launch { dao.updateCategory(it) } },
-                    onDeleteCategory = { category ->
-                        val replacement = categories.firstOrNull { it.id != category.id } ?: return@SettingsScreen
-                        scope.launch { database.withTransaction { dao.reassignCategory(category.id, replacement.id); dao.deleteCategory(category.id) } }
+                    onDeleteCategory = { category, replacement ->
+                        scope.launch { database.withTransaction { dao.reassignCategory(category.id, replacement.id, replacement.name); dao.deleteCategory(category.id) } }
                     },
                     onAddAccount = { name, balance -> scope.launch { dao.insertAccount(Account(name = name, openingBalanceCents = balance, sortOrder = accounts.size)) } },
                     onUpdateAccount = { scope.launch { dao.updateAccount(it) } },
                     onDeleteAccount = { account ->
                         val replacement = accounts.firstOrNull { it.id != account.id } ?: return@SettingsScreen
                         if (selectedAccountId == account.id) selectedAccountId = replacement.id
-                        scope.launch { database.withTransaction { dao.reassignAccount(account.id, replacement.id); dao.deleteAccount(account.id) } }
+                        scope.launch {
+                            val attached = dao.expensesForAccount(account.id)
+                            database.withTransaction { dao.deleteExpensesForAccount(account.id); dao.deleteAccount(account.id) }
+                            attached.map { it.photoPath }.filter { it.isNotBlank() }.forEach { File(it).delete() }
+                        }
                     },
                     onGenerateDemoData = {
                         scope.launch { database.withTransaction {
@@ -120,7 +126,7 @@ private fun ArkMoneyApp() {
                             val account = Account(
                                 id = accountId,
                                 name = "Демо-счёт",
-                                openingBalanceCents = demoExpenses.sumOf { it.amountCents } + 250_000_00L,
+                                openingBalanceCents = demoExpenses.sumOf { if (it.transactionType == TransactionType.EXPENSE) it.amountCents else -it.amountCents } + 250_000_00L,
                                 sortOrder = accounts.size,
                                 isDemo = true,
                             )
@@ -132,38 +138,8 @@ private fun ArkMoneyApp() {
                     onDeleteDemoData = {
                         scope.launch { database.withTransaction { dao.deleteDemoExpenses(); dao.deleteDemoAccounts() } }
                     },
-                    onImportWorkbook = { workbook ->
-                        scope.launch { database.withTransaction { importWorkbook(workbook, dao, categories, accounts) } }
-                    },
                 )
             }
         }
     }
-}
-
-private suspend fun importWorkbook(
-    workbook: ImportedWorkbook,
-    dao: com.arkulz.arkmoney.data.ExpenseDao,
-    currentCategories: List<Category>,
-    currentAccounts: List<Account>,
-) {
-    val categoryIds = currentCategories.associate { it.name.lowercase() to it.id }.toMutableMap()
-    val accountIds = currentAccounts.associate { it.name.lowercase() to it.id }.toMutableMap()
-    workbook.accounts.forEachIndexed { index, imported ->
-        val key = imported.name.lowercase()
-        val existing = currentAccounts.firstOrNull { it.name.equals(imported.name, ignoreCase = true) }
-        if (existing != null) {
-            dao.updateAccount(existing.copy(openingBalanceCents = imported.openingBalanceCents))
-        } else {
-            accountIds[key] = dao.insertAccount(Account(name = imported.name, openingBalanceCents = imported.openingBalanceCents, sortOrder = currentAccounts.size + index))
-        }
-    }
-    val importedExpenses = workbook.expenses.map { imported ->
-        val categoryKey = imported.category.lowercase()
-        val categoryId = categoryIds[categoryKey] ?: dao.insertCategory(Category(name = imported.category, emoji = "📁", sortOrder = categoryIds.size)).also { categoryIds[categoryKey] = it }
-        val accountKey = imported.account.lowercase()
-        val accountId = accountIds[accountKey] ?: dao.insertAccount(Account(name = imported.account, sortOrder = accountIds.size)).also { accountIds[accountKey] = it }
-        Expense(amountCents = imported.amountCents, category = imported.category, categoryId = categoryId, accountId = accountId, title = imported.title, comment = imported.comment, createdAt = imported.createdAt)
-    }
-    dao.insertAll(importedExpenses)
 }

@@ -13,7 +13,7 @@ private application files store attached expense photos.
 - expense entry and history;
 - analytics;
 - settings, accounts and categories;
-- import, export and testing tools.
+- export and testing tools; import code is retained internally without a user-facing entry point.
 
 `ExpensesScreen.kt`, `AnalyticsScreen.kt` and `SettingsScreen.kt` contain the
 three primary UI areas. `Theme.kt` applies Material 3 dynamic colors on Android
@@ -50,14 +50,13 @@ balances. Currency must remain integer-based at persistence boundaries.
 and daily totals. `ExpenseSearch.kt` normalizes queries across expense names,
 descriptions, category labels and monetary amounts.
 
-## Import, export and demo data
+## Import and export
 
 - `ExcelExporter.kt` writes the ArkMoney `.xlsx` package.
-- `ExcelImporter.kt` reads that same format and reconstructs core records.
-- `DemoDataGenerator.kt` produces deterministic, identifiable synthetic data.
+- `ExcelImporter.kt` is retained for a future redesign and is not exposed in the UI.
 
-Import/export compatibility is guarded by JVM round-trip tests. Import remains
-an explicit user action and must validate input before database mutation.
+Format compatibility is guarded by JVM round-trip tests. Import must validate
+input before database mutation when it returns to the product.
 
 ## Verification boundaries
 
@@ -66,3 +65,25 @@ search, formatting, Excel round trips and demo generation. Android lint checks
 platform and Compose integration. Room migrations, document pickers, photo
 handling, adaptive icon masks and full UI flows still require manual testing on
 an isolated emulator or disposable test installation.
+
+---
+
+## Русский
+
+ArkMoney — одномодульное Kotlin-приложение. Jetpack Compose отвечает за
+интерфейс, Room хранит счета, категории и операции, а фотографии находятся во
+внутреннем каталоге приложения.
+
+`Expense` хранит сумму в целых копейках и тип `EXPENSE`, `INCOME` или
+`TRANSFER`. Перевод содержит исходный и целевой счёт в одной записи. Версия базы
+6 мигрирует существующие данные как расходы и добавляет категории доходов без
+разрушительного пересоздания базы.
+
+`ExcelExporter` создаёт `.xlsx` с выбранными счетами и категориями. Код
+`ExcelImporter` сохранён для будущей переработки, но импорт не показывается в
+интерфейсе. Тесты продолжают защищать формат от регрессий.
+
+JVM-тесты проверяют калькулятор, балансы, периоды, поиск и Excel. Android Lint
+проверяет Compose и платформенную интеграцию. Камера, выбор документов, маски
+иконки и миграции дополнительно требуют ручной проверки на изолированной
+установке.

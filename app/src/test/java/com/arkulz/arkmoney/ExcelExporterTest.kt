@@ -5,6 +5,7 @@ import com.arkulz.arkmoney.data.Category
 import com.arkulz.arkmoney.data.ExcelExporter
 import com.arkulz.arkmoney.data.ExcelImporter
 import com.arkulz.arkmoney.data.Expense
+import com.arkulz.arkmoney.data.TransactionType
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.util.zip.ZipInputStream
@@ -23,7 +24,35 @@ class ExcelExporterTest {
         }
         assertTrue("xl/worksheets/sheet1.xml" in entries)
         assertTrue("xl/worksheets/sheet2.xml" in entries)
+        assertTrue("xl/worksheets/sheet3.xml" in entries)
         assertTrue("xl/workbook.xml" in entries)
+    }
+
+    @Test fun `round trip preserves income transfer time and category metadata`() {
+        val output = ByteArrayOutputStream()
+        val accounts = listOf(Account(1, "Карта", 100_000), Account(2, "Наличные", 10_000))
+        val categories = listOf(Category(5, "Зарплата", "💼", type = TransactionType.INCOME.name))
+        val timestamp = 1_786_862_345_000L
+        val operations = listOf(
+            Expense(amountCents = 55_000, category = "Зарплата", categoryId = 5, accountId = 1, type = TransactionType.INCOME.name, title = "Аванс", createdAt = timestamp),
+            Expense(amountCents = 12_300, category = "", categoryId = 0, accountId = 1, transferAccountId = 2, type = TransactionType.TRANSFER.name, createdAt = timestamp + 60_000),
+        )
+        ExcelExporter.write(output, operations, categories, accounts)
+        val imported = ExcelImporter.read(ByteArrayInputStream(output.toByteArray()))
+        assertEquals(TransactionType.INCOME, imported.expenses[0].type)
+        assertEquals(timestamp, imported.expenses[0].createdAt)
+        assertEquals(TransactionType.TRANSFER, imported.expenses[1].type)
+        assertEquals("Наличные", imported.expenses[1].transferAccount)
+        assertEquals("💼", imported.categories.single().emoji)
+        assertEquals(TransactionType.INCOME, imported.categories.single().type)
+    }
+
+    @Test fun `export is deterministic for identical input`() {
+        val expense = Expense(amountCents = 100, category = "Другое")
+        fun bytes() = ByteArrayOutputStream().also { ExcelExporter.write(it, listOf(expense), listOf(Category(1, "Другое")), listOf(Account(1, "Основной"))) }.toByteArray()
+        val first = ExcelImporter.read(ByteArrayInputStream(bytes()))
+        val second = ExcelImporter.read(ByteArrayInputStream(bytes()))
+        assertEquals(first, second)
     }
 
     @Test fun `exported workbook imports without losing core fields`() {

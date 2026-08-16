@@ -7,15 +7,17 @@ import kotlin.random.Random
 
 object DemoDataGenerator {
     fun expensesForYear(categories: List<Category>, accountId: Long, today: LocalDate = LocalDate.now()): List<Expense> {
-        if (categories.isEmpty()) return emptyList()
+        val expenseCategories = categories.filter { it.type == TransactionType.EXPENSE.name }
+        val incomeCategories = categories.filter { it.type == TransactionType.INCOME.name }
+        if (expenseCategories.isEmpty()) return emptyList()
         val random = Random(240816)
-        val preferred = categories.associateBy { it.name }
+        val preferred = expenseCategories.associateBy { it.name }
         val result = mutableListOf<Expense>()
         repeat(365) { offset ->
             val date = today.minusDays((364 - offset).toLong())
             val count = random.nextInt(1, 4)
             repeat(count) { index ->
-                val category = chooseCategory(preferred, categories, date.dayOfWeek.value, random)
+                val category = chooseCategory(preferred, expenseCategories, date.dayOfWeek.value, random)
                 val range = when (category.name) {
                     "Продукты" -> 350..3200
                     "Кафе" -> 180..1400
@@ -35,6 +37,20 @@ object DemoDataGenerator {
                     isDemo = true,
                     title = if (random.nextInt(100) < 38) demoTitle(category.name, random) else "",
                     createdAt = date.atTime(time).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(),
+                )
+            }
+            if ((date.dayOfMonth == 10 || date.dayOfMonth == 25) && incomeCategories.isNotEmpty()) {
+                val category = incomeCategories[(date.monthValue + date.dayOfMonth) % incomeCategories.size]
+                val salary = if (date.dayOfMonth == 10) 75_000_00L else 28_000_00L
+                result += Expense(
+                    amountCents = salary,
+                    category = category.name,
+                    categoryId = category.id,
+                    accountId = accountId,
+                    isDemo = true,
+                    title = if (date.dayOfMonth == 10) "Зарплата" else "Аванс",
+                    type = TransactionType.INCOME.name,
+                    createdAt = date.atTime(10, 0).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(),
                 )
             }
         }

@@ -9,4 +9,5 @@ data class Category(
     val name: String,
     val emoji: String = "•••",
     val sortOrder: Int = 0,
+    val type: String = TransactionType.EXPENSE.name,
 )

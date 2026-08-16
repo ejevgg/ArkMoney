@@ -13,6 +13,10 @@ val releaseSigningProperties = Properties().apply {
     }
 }
 
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
 android {
     namespace = "com.arkulz.arkmoney"
     compileSdk {
@@ -25,8 +29,8 @@ android {
         applicationId = "com.arkulz.arkmoney"
         minSdk = 29
         targetSdk = 36
-        versionCode = 3
-        versionName = "0.1.0"
+        versionCode = 5
+        versionName = "0.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

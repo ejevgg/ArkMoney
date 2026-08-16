@@ -29,3 +29,21 @@ ArkMoney data. Use an isolated emulator or test-only installation.
 - add or update tests when financial, import or persistence logic changes;
 - do not commit APK files, signing keys, device backups, Excel exports, local
   databases, receipt photos or personal financial data.
+
+---
+
+## Русский
+
+Перед изменением проверьте существующие задачи, опишите пользовательскую
+проблему и не смешивайте несвязанные правки. Никогда не используйте реальные
+финансовые данные, фотографии чеков или экспорты как тестовые файлы.
+
+Перед pull request выполните:
+
+```bash
+./gradlew testDebugUnitTest lintDebug assembleDebug
+```
+
+В pull request опишите поведение до и после изменения, добавьте обезличенные
+скриншоты интерфейса и тесты для финансовой логики, импорта и хранения. Не
+добавляйте APK, ключи, базы, резервные копии и персональные данные.
