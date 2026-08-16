@@ -1,0 +1,12 @@
+ArkMoney release signing certificate
+====================================
+
+Certificate subject: CN=ArkMoney, OU=Ark Apps, O=Ark, C=RU
+Key algorithm: RSA 4096-bit
+Certificate SHA-256: 8e0a5bd7b28534e6d12fb2733a2be00cf939f8ecefc48bbc431915066d4ed95f
+Public key SHA-256: 7a25ef8e69ad56d6e50e0c7dd30053329ed9c93bfc6256ec51d5975856d77701
+APK signature scheme: v2
+
+The certificate fingerprint must remain unchanged for all compatible ArkMoney
+updates. This file contains public certificate metadata only; the private key is
+not stored in Git or attached to releases.
