@@ -1,0 +1,64 @@
+# Gradle
+.gradle/
+build/
+**/build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# Local Android SDK configuration
+local.properties
+
+# Android Studio / IntelliJ IDEA
+.idea/
+*.iml
+*.ipr
+*.iws
+.kotlin/
+out/
+
+# Android build outputs
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Signing credentials and secrets
+signing/
+*.jks
+*.keystore
+keystore.properties
+signing.properties
+secrets.properties
+.env
+.env.*
+!.env.example
+
+# Operating systems
+.DS_Store
+Thumbs.db
+
+# Logs and temporary files
+*.log
+*.hprof
+*.tmp
+*.swp
+*~
+
+# Distribution directory: keep checksums and notes, not binaries
+dist/*.apk
+dist/*.aab
+
+# Local device recovery snapshots
+device-backups/
+
+# User financial data and exports
+*.xlsx
+*.xls
+*.csv
+*.db
+*.db-shm
+*.db-wal
+expense-photos/

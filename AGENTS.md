@@ -1,0 +1,69 @@
+# ArkMoney agent guide
+
+This file defines mandatory rules for coding agents in this repository. Read
+`README.md`, `docs/PRODUCT.md`, and `docs/ARCHITECTURE.md` before changing
+user-facing behavior or financial data handling.
+
+## Project identity
+
+- Product name: ArkMoney.
+- Android application ID and namespace: `com.arkulz.arkmoney`.
+- Minimum Android version: Android 10 / API 29.
+- UI: Jetpack Compose with Material 3 and dynamic color where available.
+- Data model: local-first Room database plus private expense photo files.
+- The application does not require an account, analytics or network access.
+
+Do not change the application ID, database name, signing identity, minimum SDK,
+Excel format or storage model without explicit approval and a migration plan.
+
+## Data safety
+
+- Expenses, accounts and attachments are important user data; preserve them.
+- Never clear app data, uninstall the installed app, delete its database or run
+  destructive ADB commands without explicit approval.
+- Never run connected tests on a device containing personal financial data.
+- Do not commit or print signing keys, exports, databases, backups, receipt
+  photos, passwords or personal content.
+- Destructive actions must explain their scope and require confirmation.
+- Database schema changes require explicit Room migrations. Destructive fallback
+  is not acceptable.
+
+## Financial and transfer invariants
+
+- Money is stored as integer cents. Do not persist floating-point currency.
+- Account balances must include only expenses belonging to that account.
+- Date period boundaries are inclusive and use the user's local calendar.
+- Excel import must validate ArkMoney's workbook structure before writing data.
+- Import and export changes require round-trip tests, including special text.
+- Demo data must remain identifiable and removable without affecting real data.
+- Deleting an expense must also remove its private photo when appropriate.
+
+## Verification
+
+Run before handing off a code change:
+
+```bash
+./gradlew testDebugUnitTest lintDebug assembleDebug
+```
+
+Report the exact checks performed. Real-device installation is optional and
+must never be combined with instrumentation on a personal-data installation.
+
+## Git and releases
+
+- Preserve unrelated and untracked user files.
+- Never commit `signing/`, APKs, exports, databases, photos, backups or local
+  configuration.
+- Update `CHANGELOG.md` for user-visible changes.
+- Increase `versionCode` for every distributed APK.
+- Release APKs must use the existing private release key; verify their signature
+  and SHA-256 checksum before publication.
+- Do not publish, tag, rewrite history or create a release unless explicitly
+  requested.
+
+## Style
+
+- User-facing strings are currently Russian.
+- Prefer clear Material 3 patterns and accessible content descriptions.
+- Optimize common expense entry for speed and one-handed use.
+- Keep changes focused and avoid speculative dependencies or architecture churn.
