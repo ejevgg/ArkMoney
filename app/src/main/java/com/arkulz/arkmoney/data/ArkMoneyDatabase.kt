@@ -7,7 +7,7 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [Expense::class, Category::class, Account::class], version = 5, exportSchema = false)
+@Database(entities = [Expense::class, Category::class, Account::class], version = 6, exportSchema = true)
 abstract class ArkMoneyDatabase : RoomDatabase() {
     abstract fun expenseDao(): ExpenseDao
 
@@ -20,7 +20,7 @@ abstract class ArkMoneyDatabase : RoomDatabase() {
                     context.applicationContext,
                     ArkMoneyDatabase::class.java,
                     "arkmoney.db",
-                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                     .addCallback(object : Callback() {
                         override fun onCreate(db: SupportSQLiteDatabase) {
                             super.onCreate(db)
@@ -63,18 +63,43 @@ abstract class ArkMoneyDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE expenses ADD COLUMN type TEXT NOT NULL DEFAULT 'EXPENSE'")
+                db.execSQL("ALTER TABLE expenses ADD COLUMN transferAccountId INTEGER DEFAULT NULL")
+                db.execSQL("ALTER TABLE categories ADD COLUMN type TEXT NOT NULL DEFAULT 'EXPENSE'")
+                incomeCategories.forEach { seed ->
+                    db.execSQL(
+                        "INSERT INTO categories (name, emoji, sortOrder, type) VALUES (?, ?, ?, 'INCOME')",
+                        arrayOf<Any>(seed.first, seed.second, seed.third),
+                    )
+                }
+            }
+        }
+
         private val defaultCategories = listOf(
             Triple("Другое", "•••", 0), Triple("Продукты", "🛒", 1),
             Triple("Кафе", "☕", 2), Triple("Транспорт", "🚕", 3),
             Triple("Дом", "🏠", 4), Triple("Здоровье", "♥", 5),
             Triple("Развлечения", "🎬", 6),
         )
+        private val incomeCategories = listOf(
+            Triple("Зарплата", "💼", 0), Triple("Подработка", "🛠️", 1),
+            Triple("Подарки", "🎁", 2), Triple("Проценты", "📈", 3),
+            Triple("Другое поступление", "💰", 4),
+        )
 
         private fun seedDefaults(db: SupportSQLiteDatabase) {
             defaultCategories.forEachIndexed { index, seed ->
                 db.execSQL(
-                    "INSERT INTO categories (id, name, emoji, sortOrder) VALUES (?, ?, ?, ?)",
+                    "INSERT INTO categories (id, name, emoji, sortOrder, type) VALUES (?, ?, ?, ?, 'EXPENSE')",
                     arrayOf<Any>(index + 1, seed.first, seed.second, seed.third),
+                )
+            }
+            incomeCategories.forEach { seed ->
+                db.execSQL(
+                    "INSERT INTO categories (name, emoji, sortOrder, type) VALUES (?, ?, ?, 'INCOME')",
+                    arrayOf<Any>(seed.first, seed.second, seed.third),
                 )
             }
             db.execSQL("INSERT INTO accounts (id, name, openingBalanceCents, sortOrder) VALUES (1, 'Основной', 0, 0)")

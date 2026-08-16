@@ -6,11 +6,13 @@ import java.io.File
 import java.util.UUID
 
 fun storeExpensePhoto(context: Context, source: Uri): String {
-    val directory = File(context.filesDir, "expense_photos").apply { mkdirs() }
-    val target = File(directory, "${UUID.randomUUID()}.jpg")
+    val target = createExpensePhotoTarget(context)
     context.contentResolver.openInputStream(source).use { input ->
         requireNotNull(input) { "Не удалось открыть изображение" }
         target.outputStream().use(input::copyTo)
     }
     return target.absolutePath
 }
+
+fun createExpensePhotoTarget(context: Context): File =
+    File(File(context.filesDir, "expense_photos").apply { mkdirs() }, "${UUID.randomUUID()}.jpg")

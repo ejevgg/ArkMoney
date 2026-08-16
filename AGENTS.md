@@ -35,7 +35,6 @@ Excel format or storage model without explicit approval and a migration plan.
 - Date period boundaries are inclusive and use the user's local calendar.
 - Excel import must validate ArkMoney's workbook structure before writing data.
 - Import and export changes require round-trip tests, including special text.
-- Demo data must remain identifiable and removable without affecting real data.
 - Deleting an expense must also remove its private photo when appropriate.
 
 ## Verification
@@ -67,3 +66,21 @@ must never be combined with instrumentation on a personal-data installation.
 - Prefer clear Material 3 patterns and accessible content descriptions.
 - Optimize common expense entry for speed and one-handed use.
 - Keep changes focused and avoid speculative dependencies or architecture churn.
+
+---
+
+## Русский
+
+- Не изменяйте `com.arkulz.arkmoney`, `arkmoney.db`, минимальную версию Android,
+  формат Excel или ключ подписи без явного согласования и плана миграции.
+- Сохраняйте пользовательские операции, счета, категории и фотографии. Не
+  очищайте данные приложения и не запускайте инструментальные тесты на личной
+  установке.
+- Деньги хранятся только в целых копейках. Перевод не является доходом или
+  расходом и должен атомарно учитывать оба счёта.
+- Изменения Room требуют явной миграции; изменения Excel — обратных тестов и
+  проверки ошибочных файлов.
+- Перед передачей изменений выполните `./gradlew testDebugUnitTest lintDebug
+  assembleDebug` и точно сообщите результат.
+- Не добавляйте в Git ключи, базы, экспорты, фотографии, резервные копии и
+  персональные данные.

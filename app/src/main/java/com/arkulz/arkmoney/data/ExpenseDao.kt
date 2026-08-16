@@ -17,6 +17,21 @@ interface ExpenseDao {
     @Update
     suspend fun updateExpense(expense: Expense)
 
+    @Query("SELECT * FROM expenses WHERE id = :id")
+    suspend fun expenseById(id: Long): Expense?
+
+    @Query("DELETE FROM expenses WHERE id = :id")
+    suspend fun deleteExpense(id: Long)
+
+    @Query("SELECT * FROM expenses WHERE accountId = :accountId OR transferAccountId = :accountId")
+    suspend fun expensesForAccount(accountId: Long): List<Expense>
+
+    @Query("DELETE FROM expenses WHERE accountId = :accountId OR transferAccountId = :accountId")
+    suspend fun deleteExpensesForAccount(accountId: Long)
+
+    @Query("SELECT COUNT(*) FROM expenses WHERE categoryId = :categoryId")
+    suspend fun countExpensesForCategory(categoryId: Long): Int
+
     @Insert
     suspend fun insertAll(expenses: List<Expense>)
 
@@ -31,8 +46,8 @@ interface ExpenseDao {
 
     @Insert suspend fun insertCategory(category: Category): Long
     @Update suspend fun updateCategory(category: Category)
-    @Query("UPDATE expenses SET categoryId = :replacementId WHERE categoryId = :categoryId")
-    suspend fun reassignCategory(categoryId: Long, replacementId: Long)
+    @Query("UPDATE expenses SET categoryId = :replacementId, category = :replacementName WHERE categoryId = :categoryId")
+    suspend fun reassignCategory(categoryId: Long, replacementId: Long, replacementName: String)
     @Query("DELETE FROM categories WHERE id = :categoryId")
     suspend fun deleteCategory(categoryId: Long)
 
@@ -41,8 +56,6 @@ interface ExpenseDao {
 
     @Insert suspend fun insertAccount(account: Account): Long
     @Update suspend fun updateAccount(account: Account)
-    @Query("UPDATE expenses SET accountId = :replacementId WHERE accountId = :accountId")
-    suspend fun reassignAccount(accountId: Long, replacementId: Long)
     @Query("DELETE FROM accounts WHERE id = :accountId")
     suspend fun deleteAccount(accountId: Long)
 }

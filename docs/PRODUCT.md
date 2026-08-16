@@ -44,19 +44,35 @@
 - Analytics show category totals and daily spending, including zero-value days
   where needed for a continuous chart.
 
-## Settings, testing and data transfer
+## Settings and data transfer
 
 - Theme choices apply immediately and persist: device, light or dark.
-- The application version is shown as `0.1.0`.
-- Ten taps on the version name reveal the Testing page.
-- Demo generation creates identifiable synthetic expenses across the latest
-  year; some include custom names and none include photos.
-- Removing demo data must preserve all non-demo records.
-- Excel export contains ArkMoney accounts, categories and expenses.
-- Import accepts workbooks produced by ArkMoney and preserves core fields.
+- The application version is centered below the GitHub repository action.
+- Excel export contains the selected ArkMoney accounts, categories and operations.
+- Import is temporarily unavailable while its interaction and validation flow is redesigned.
 
 ## Privacy and safety
 
 ArkMoney contains no account system, analytics SDK or network service. The Room
 database and expense photos stay in private storage. Excel transfer is always an
 explicit user action.
+
+---
+
+## Русский
+
+ArkMoney работает локально без аккаунта и сети. Поддерживаются расходы, доходы
+и переводы между счетами. Перевод является одной связанной операцией и не входит
+в сумму доходов или расходов.
+
+Запись содержит сумму, счёт, категорию, дату, время, необязательные название,
+описание и фотографию. Записи удаляются только после подтверждения. Удаление
+счёта удаляет связанные операции и фотографии после явного предупреждения. При
+удалении категории пользователь выбирает категорию назначения того же типа.
+
+Текущий месяц выбран в аналитике по умолчанию. Доступны неделя, месяц, квартал,
+год и произвольный диапазон. Доходы и расходы отображаются раздельно.
+
+Excel сохраняет тип операции, точное время, выбранные счета и категории. Импорт
+временно недоступен до переработки его сценария и проверки. Передача файлов всегда
+выполняется по явному действию пользователя.

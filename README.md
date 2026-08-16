@@ -15,14 +15,14 @@ open the APK.
 
 ## Features
 
-- fast expense entry with a built-in expression calculator;
-- custom categories with emoji icons;
+- fast expense and income entry with a built-in expression calculator;
+- linked transfers between accounts;
+- typed custom categories with emoji icons;
 - multiple accounts and a live balance for the selected account;
-- expense names, descriptions and private photo attachments;
+- operation names, descriptions, editable time and private camera/gallery photos;
 - history grouped by day, search and date navigation;
-- week, month, quarter and year analytics;
-- Excel export and round-trip import;
-- reversible demo data covering the latest year;
+- week, month, quarter, year and custom-range analytics;
+- Excel export with account and category selection;
 - system, light and dark themes;
 - Material 3 interface and Android 12 themed icon support.
 
@@ -72,3 +72,31 @@ for release notes.
 - [Security policy](SECURITY.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Product behavior](docs/PRODUCT.md)
+
+---
+
+## Русский
+
+ArkMoney — локальное Android-приложение для приватного учёта расходов, доходов
+и переводов между счетами.
+
+### Возможности
+
+- быстрый ввод операций через встроенный калькулятор;
+- категории с эмодзи и несколько счетов с актуальными балансами;
+- названия, описания, дата, время и фотографии операций;
+- история по дням, поиск и переход к дате;
+- аналитика расходов и доходов за стандартные и произвольные периоды;
+- экспорт Excel с выбором счетов и категорий;
+- светлая, тёмная и системная темы Material 3.
+
+ArkMoney работает без аккаунта, аналитики и сетевого доступа. Данные остаются
+во внутреннем хранилище приложения до явного экспорта. Требуется Android 10 или
+новее. Последние APK доступны в
+[GitHub Releases](https://github.com/ejevgg/ArkMoney/releases).
+
+Для локальной проверки:
+
+```bash
+./gradlew testDebugUnitTest lintDebug assembleDebug
+```

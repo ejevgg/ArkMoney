@@ -23,6 +23,10 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.DateRangePicker
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -41,40 +45,53 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.arkulz.arkmoney.data.Category
 import com.arkulz.arkmoney.data.Expense
+import com.arkulz.arkmoney.data.TransactionType
+import com.arkulz.arkmoney.data.transactionType
+import java.time.Instant
+import java.time.ZoneOffset
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 private val chartColors = listOf(Color(0xFF315C3B), Color(0xFFE08B32), Color(0xFF6274A8), Color(0xFF9A5E8B), Color(0xFF4F8C83), Color(0xFFB15D57))
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AnalyticsScreen(modifier: Modifier, expenses: List<Expense>, categories: List<Category>) {
     var period by rememberSaveable { mutableStateOf(AnalyticsPeriod.MONTH) }
     var anchorEpoch by rememberSaveable { mutableLongStateOf(LocalDate.now().toEpochDay()) }
     val anchor = LocalDate.ofEpochDay(anchorEpoch)
-    val range = period.range(anchor)
-    val selected = expenses.inRange(range)
-    val total = selected.sumOf { it.amountCents }
-    val byCategory = selected.groupBy { it.categoryId }.mapValues { it.value.sumOf(Expense::amountCents) }.entries.sortedByDescending { it.value }
+    var customStart by rememberSaveable { mutableLongStateOf(LocalDate.now().withDayOfMonth(1).toEpochDay()) }
+    var customEnd by rememberSaveable { mutableLongStateOf(LocalDate.now().toEpochDay()) }
+    var showRangePicker by remember { mutableStateOf(false) }
+    val range = if (period == AnalyticsPeriod.CUSTOM) DateRange(LocalDate.ofEpochDay(customStart), LocalDate.ofEpochDay(customEnd)) else period.range(anchor)
+    val selected = expenses.inRange(range).filter { it.transactionType != TransactionType.TRANSFER }
+    val expenseItems = selected.filter { it.transactionType == TransactionType.EXPENSE }
+    val incomeItems = selected.filter { it.transactionType == TransactionType.INCOME }
+    val total = expenseItems.sumOf { it.amountCents }
+    val incomeTotal = incomeItems.sumOf { it.amountCents }
+    val byCategory = expenseItems.groupBy { it.categoryId }.mapValues { it.value.sumOf(Expense::amountCents) }.entries.sortedByDescending { it.value }
+    val incomeByCategory = incomeItems.groupBy { it.categoryId }.mapValues { it.value.sumOf(Expense::amountCents) }.entries.sortedByDescending { it.value }
     val today = LocalDate.now()
     val lastSevenDays = (6 downTo 0).map { today.minusDays(it.toLong()) }
-    val lastSevenValues = expenses.dailyTotals(lastSevenDays)
+    val lastSevenValues = expenses.filter { it.transactionType == TransactionType.EXPENSE }.dailyTotals(lastSevenDays)
 
     LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item {
             Text("Аналитика", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                IconButton({ anchorEpoch = period.shift(anchor, -1).toEpochDay() }) { Text("‹", style = MaterialTheme.typography.headlineMedium) }
+                IconButton({ if (period != AnalyticsPeriod.CUSTOM) anchorEpoch = period.shift(anchor, -1).toEpochDay() }) { Text("‹", style = MaterialTheme.typography.headlineMedium) }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(range.title, fontWeight = FontWeight.SemiBold)
                     if (period == AnalyticsPeriod.MONTH && range.start.month == today.month && range.start.year == today.year) Text("Текущий месяц", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                IconButton({ anchorEpoch = period.shift(anchor, 1).toEpochDay() }) { Text("›", style = MaterialTheme.typography.headlineMedium) }
+                IconButton({ if (period != AnalyticsPeriod.CUSTOM) anchorEpoch = period.shift(anchor, 1).toEpochDay() }) { Text("›", style = MaterialTheme.typography.headlineMedium) }
             }
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                AnalyticsPeriod.entries.forEach { item -> PeriodChip(item.title, item == period) { period = item; anchorEpoch = LocalDate.now().toEpochDay() } }
+                AnalyticsPeriod.entries.forEach { item -> PeriodChip(item.title, item == period) { period = item; anchorEpoch = LocalDate.now().toEpochDay(); if (item == AnalyticsPeriod.CUSTOM) showRangePicker = true } }
             }
         }
+        item { CategoryAnalyticsCard("Доходы за период", incomeTotal, incomeByCategory.map { it.key to it.value }, categories) }
         item {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(18.dp)) {
@@ -99,9 +116,9 @@ fun AnalyticsScreen(modifier: Modifier, expenses: List<Expense>, categories: Lis
                     Text("Последние 7 дней", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     Text("Всего ${formatMoney(lastSevenValues.sum())}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     WeeklyBars(lastSevenValues, Modifier.fillMaxWidth().height(150.dp).padding(top = 16.dp))
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Row(Modifier.fillMaxWidth()) {
                         lastSevenDays.forEachIndexed { index, date ->
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text(date.format(DateTimeFormatter.ofPattern("EE", Locale.forLanguageTag("ru"))).take(2), style = MaterialTheme.typography.labelSmall)
                                 Text(date.dayOfMonth.toString(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Text(compactMoney(lastSevenValues[index]), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
@@ -119,6 +136,27 @@ fun AnalyticsScreen(modifier: Modifier, expenses: List<Expense>, categories: Lis
             }
         }
     }
+    if (showRangePicker) {
+        val state = androidx.compose.material3.rememberDateRangePickerState(
+            initialSelectedStartDateMillis = LocalDate.ofEpochDay(customStart).atStartOfDay().toInstant(ZoneOffset.UTC).toEpochMilli(),
+            initialSelectedEndDateMillis = LocalDate.ofEpochDay(customEnd).atStartOfDay().toInstant(ZoneOffset.UTC).toEpochMilli(),
+        )
+        DatePickerDialog({ showRangePicker = false }, confirmButton = { TextButton({
+            val start = state.selectedStartDateMillis?.let { Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate() }
+            val end = state.selectedEndDateMillis?.let { Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate() }
+            if (start != null && end != null) { customStart = start.toEpochDay(); customEnd = end.toEpochDay(); period = AnalyticsPeriod.CUSTOM; showRangePicker = false }
+        }) { Text("Выбрать") } }, dismissButton = { TextButton({ showRangePicker = false }) { Text("Отмена") } }) { DateRangePicker(state, title = { Text("Произвольный период", Modifier.padding(16.dp)) }) }
+    }
+}
+
+@Composable private fun CategoryAnalyticsCard(title: String, total: Long, entries: List<Pair<Long, Long>>, categories: List<Category>) {
+    Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(18.dp)) {
+        Text(title, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(formatMoney(total), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
+        DonutChart(entries.map { it.second }, total, Modifier.fillMaxWidth().height(150.dp))
+        if (entries.isEmpty()) Text("Нет операций за выбранный период", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        entries.take(6).forEachIndexed { index, entry -> Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) { Box(Modifier.size(10.dp).background(chartColors[index % chartColors.size], CircleShape)); Text(categories.firstOrNull { it.id == entry.first }?.name ?: "Другое", Modifier.padding(start = 9.dp).weight(1f)); Text(formatMoney(entry.second), fontWeight = FontWeight.Medium) } }
+    } }
 }
 
 @Composable private fun PeriodChip(label: String, selected: Boolean, onClick: () -> Unit) {

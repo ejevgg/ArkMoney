@@ -2,6 +2,7 @@ package com.arkulz.arkmoney
 
 import com.arkulz.arkmoney.data.Category
 import com.arkulz.arkmoney.data.DemoDataGenerator
+import com.arkulz.arkmoney.data.TransactionType
 import java.time.LocalDate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -25,5 +26,16 @@ class DemoDataGeneratorTest {
         val dates = expenses.map { java.time.Instant.ofEpochMilli(it.createdAt).atZone(java.time.ZoneId.systemDefault()).toLocalDate() }
         assertEquals(end.minusDays(364), dates.minOrNull())
         assertEquals(end, dates.maxOrNull())
+    }
+
+    @Test fun `demo data includes regular income when income categories exist`() {
+        val categories = listOf(
+            Category(1, "Продукты"),
+            Category(2, "Зарплата", "💰", type = TransactionType.INCOME.name),
+        )
+        val operations = DemoDataGenerator.expensesForYear(categories, 1, LocalDate.of(2026, 8, 16))
+        val income = operations.filter { it.type == TransactionType.INCOME.name }
+        assertTrue(income.size >= 20)
+        assertTrue(income.all { it.categoryId == 2L && it.title.isNotBlank() })
     }
 }
