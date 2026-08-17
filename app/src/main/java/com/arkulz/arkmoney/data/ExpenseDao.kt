@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.Query
 import androidx.room.Update
+import androidx.room.Transaction
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -35,6 +36,16 @@ interface ExpenseDao {
     @Insert
     suspend fun insertAll(expenses: List<Expense>)
 
+    @Insert
+    suspend fun insertCategories(categories: List<Category>)
+
+    @Insert
+    suspend fun insertAccounts(accounts: List<Account>)
+
+    @Query("DELETE FROM expenses") suspend fun deleteAllExpenses()
+    @Query("DELETE FROM categories") suspend fun deleteAllCategories()
+    @Query("DELETE FROM accounts") suspend fun deleteAllAccounts()
+
     @Query("DELETE FROM expenses WHERE isDemo = 1")
     suspend fun deleteDemoExpenses()
 
@@ -44,12 +55,27 @@ interface ExpenseDao {
     @Query("SELECT * FROM categories ORDER BY sortOrder, id")
     fun observeCategories(): Flow<List<Category>>
 
+    @Query("SELECT * FROM categories ORDER BY sortOrder, id")
+    suspend fun categoriesNow(): List<Category>
+
     @Insert suspend fun insertCategory(category: Category): Long
     @Update suspend fun updateCategory(category: Category)
+    @Update suspend fun updateCategories(categories: List<Category>)
     @Query("UPDATE expenses SET categoryId = :replacementId, category = :replacementName WHERE categoryId = :categoryId")
     suspend fun reassignCategory(categoryId: Long, replacementId: Long, replacementName: String)
     @Query("DELETE FROM categories WHERE id = :categoryId")
-    suspend fun deleteCategory(categoryId: Long)
+    suspend fun deleteCategory(categoryId: Long): Int
+
+    @Transaction
+    suspend fun reassignAndDeleteCategory(category: Category, replacement: Category) {
+        require(category.id != replacement.id && category.type == replacement.type)
+        reassignCategory(category.id, replacement.id, replacement.name)
+        check(deleteCategory(category.id) == 1) { "Category ${category.id} was not deleted" }
+        val normalized = categoriesNow().filter { it.type == category.type }
+            .sortedWith(compareBy<Category> { it.sortOrder }.thenBy { it.id })
+            .mapIndexed { index, item -> item.copy(sortOrder = index) }
+        updateCategories(normalized)
+    }
 
     @Query("SELECT * FROM accounts ORDER BY sortOrder, id")
     fun observeAccounts(): Flow<List<Account>>

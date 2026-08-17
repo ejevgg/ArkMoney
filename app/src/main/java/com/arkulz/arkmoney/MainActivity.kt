@@ -2,6 +2,7 @@ package com.arkulz.arkmoney
 
 import android.os.Bundle
 import android.content.Context
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -28,14 +29,21 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.edit
 import androidx.room.withTransaction
 import com.arkulz.arkmoney.data.Account
+import com.arkulz.arkmoney.data.BackupArchive
+import com.arkulz.arkmoney.data.ArkMoneyBackup
 import com.arkulz.arkmoney.data.ArkMoneyDatabase
 import com.arkulz.arkmoney.data.Category
 import com.arkulz.arkmoney.data.DemoDataGenerator
 import com.arkulz.arkmoney.data.Expense
 import com.arkulz.arkmoney.data.TransactionType
 import com.arkulz.arkmoney.data.transactionType
+import com.arkulz.arkmoney.data.createExpensePhotoTarget
 import java.io.File
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -54,6 +62,9 @@ private fun ArkMoneyApp() {
     var themeMode by remember {
         mutableStateOf(ThemeMode.from(preferences.getString("theme", ThemeMode.SYSTEM.name)))
     }
+    var hapticsEnabled by remember { mutableStateOf(preferences.getBoolean("haptics", true)) }
+    var dailyLimitEnabled by remember { mutableStateOf(preferences.getBoolean("daily_limit_enabled", false)) }
+    var dailyLimitCents by remember { mutableStateOf(preferences.getLong("daily_limit_cents", 0L)) }
     ArkMoneyTheme(themeMode) {
         val database = remember { ArkMoneyDatabase.getInstance(context) }
         val dao = remember(database) { database.expenseDao() }
@@ -61,6 +72,7 @@ private fun ArkMoneyApp() {
         val categories by dao.observeCategories().collectAsState(initial = emptyList())
         val accounts by dao.observeAccounts().collectAsState(initial = emptyList())
         val scope = rememberCoroutineScope()
+        val categoryOrderMutex = remember { Mutex() }
         var page by rememberSaveable { mutableStateOf(AppPage.EXPENSES) }
         var selectedAccountId by rememberSaveable { mutableStateOf<Long?>(null) }
         val selectedAccount = accounts.firstOrNull { it.id == selectedAccountId }
@@ -89,6 +101,11 @@ private fun ArkMoneyApp() {
                     },
                     onUpdateExpense = { expense -> scope.launch { dao.updateExpense(expense) } },
                     onDeleteExpense = { expense -> scope.launch { database.withTransaction { dao.deleteExpense(expense.id) }; if (expense.photoPath.isNotBlank()) File(expense.photoPath).delete() } },
+                    onMoveCategory = { category, direction -> scope.launch {
+                        categoryOrderMutex.withLock { dao.updateCategories(reorderedCategoryType(dao.categoriesNow(), category.id, direction)) }
+                    } },
+                    hapticsEnabled = hapticsEnabled,
+                    dailyLimitCents = dailyLimitCents.takeIf { dailyLimitEnabled },
                 )
                 AppPage.ANALYTICS -> AnalyticsScreen(Modifier.padding(padding), expenses, categories)
                 AppPage.SETTINGS -> SettingsScreen(
@@ -103,8 +120,20 @@ private fun ArkMoneyApp() {
                     },
                     onAddCategory = { name, emoji, type -> scope.launch { dao.insertCategory(Category(name = name, emoji = emoji, sortOrder = categories.count { it.type == type.name }, type = type.name)) } },
                     onUpdateCategory = { scope.launch { dao.updateCategory(it) } },
-                    onDeleteCategory = { category, replacement ->
-                        scope.launch { database.withTransaction { dao.reassignCategory(category.id, replacement.id, replacement.name); dao.deleteCategory(category.id) } }
+                    onDeleteCategory = { category, replacement, completed ->
+                        scope.launch {
+                            categoryOrderMutex.withLock {
+                                runCatching { dao.reassignAndDeleteCategory(category, replacement) }
+                                    .onSuccess {
+                                        completed(true)
+                                        Toast.makeText(context, "Категория удалена", Toast.LENGTH_SHORT).show()
+                                    }
+                                    .onFailure {
+                                        completed(false)
+                                        Toast.makeText(context, "Не удалось удалить категорию: ${it.message ?: "ошибка базы данных"}", Toast.LENGTH_LONG).show()
+                                    }
+                            }
+                        }
                     },
                     onAddAccount = { name, balance -> scope.launch { dao.insertAccount(Account(name = name, openingBalanceCents = balance, sortOrder = accounts.size)) } },
                     onUpdateAccount = { scope.launch { dao.updateAccount(it) } },
@@ -138,6 +167,37 @@ private fun ArkMoneyApp() {
                     onDeleteDemoData = {
                         scope.launch { database.withTransaction { dao.deleteDemoExpenses(); dao.deleteDemoAccounts() } }
                     },
+                    hapticsEnabled = hapticsEnabled,
+                    onHapticsEnabledChange = { hapticsEnabled = it; preferences.edit { putBoolean("haptics", it) } },
+                    dailyLimitEnabled = dailyLimitEnabled,
+                    dailyLimitCents = dailyLimitCents,
+                    onDailyLimitChange = { enabled, cents ->
+                        dailyLimitEnabled = enabled; dailyLimitCents = cents
+                        preferences.edit { putBoolean("daily_limit_enabled", enabled); putLong("daily_limit_cents", cents) }
+                    },
+                    onCategoryOrderChanged = { ordered -> scope.launch {
+                        categoryOrderMutex.withLock { dao.updateCategories(ordered) }
+                    } },
+                    onRestoreBackup = { archive -> scope.launch {
+                        val createdPaths = mutableListOf<String>()
+                        runCatching {
+                            val oldPhotos = expenses.mapNotNull { it.photoPath.takeIf(String::isNotBlank) }
+                            val restored = withContext(Dispatchers.IO) {
+                                File(context.filesDir, "last_before_restore.arkmoney").outputStream().use { ArkMoneyBackup.write(it, accounts, categories, expenses) }
+                                archive.expenses.map { operation ->
+                                    val path = archive.photos[operation.id]?.let { bytes -> createExpensePhotoTarget(context).apply { writeBytes(bytes); com.arkulz.arkmoney.data.compressExpensePhoto(this); createdPaths += absolutePath }.absolutePath }.orEmpty()
+                                    operation.copy(photoPath = path)
+                                }
+                            }
+                            database.withTransaction {
+                                dao.deleteAllExpenses(); dao.deleteAllCategories(); dao.deleteAllAccounts()
+                                dao.insertAccounts(archive.accounts); dao.insertCategories(archive.categories); dao.insertAll(restored)
+                            }
+                            oldPhotos.forEach { File(it).delete() }
+                            selectedAccountId = archive.accounts.firstOrNull()?.id
+                        }.onSuccess { Toast.makeText(context, "Резервная копия восстановлена", Toast.LENGTH_SHORT).show() }
+                            .onFailure { createdPaths.forEach { File(it).delete() }; Toast.makeText(context, "Не удалось восстановить данные", Toast.LENGTH_LONG).show() }
+                    } },
                 )
             }
         }

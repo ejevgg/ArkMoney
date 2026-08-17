@@ -20,7 +20,7 @@ object DemoDataGenerator {
                 val category = chooseCategory(preferred, expenseCategories, date.dayOfWeek.value, random)
                 val range = when (category.name) {
                     "Продукты" -> 350..3200
-                    "Кафе" -> 180..1400
+                    "Кафе", "Кафе и доставка" -> 180..1400
                     "Транспорт" -> 80..900
                     "Дом" -> 500..6500
                     "Здоровье" -> 250..4000
@@ -60,7 +60,7 @@ object DemoDataGenerator {
     private fun demoTitle(category: String, random: Random): String {
         val titles = when (category) {
             "Продукты" -> listOf("Продукты на неделю", "Покупки к ужину", "Овощи и фрукты")
-            "Кафе" -> listOf("Кофе по дороге", "Обед с коллегами", "Завтрак в кафе")
+            "Кафе", "Кафе и доставка" -> listOf("Кофе по дороге", "Обед с коллегами", "Доставка ужина")
             "Транспорт" -> listOf("Такси домой", "Проездной", "Поездка в центр")
             "Дом" -> listOf("Товары для дома", "Коммунальные услуги", "Мелкий ремонт")
             "Здоровье" -> listOf("Аптека", "Приём врача", "Витамины")
@@ -79,7 +79,7 @@ object DemoDataGenerator {
         val weighted = buildList {
             repeat(5) { preferred["Продукты"]?.let(::add) }
             repeat(3) { preferred["Транспорт"]?.let(::add) }
-            repeat(3) { preferred["Кафе"]?.let(::add) }
+            repeat(3) { (preferred["Кафе и доставка"] ?: preferred["Кафе"])?.let(::add) }
             repeat(2) { preferred["Дом"]?.let(::add) }
             preferred["Здоровье"]?.let(::add)
             repeat(if (dayOfWeek >= 6) 4 else 1) { preferred["Развлечения"]?.let(::add) }

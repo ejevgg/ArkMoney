@@ -1,16 +1,24 @@
 package com.arkulz.arkmoney
 
 import android.net.Uri
+import android.content.Context
+import android.graphics.Matrix
+import android.view.GestureDetector
+import android.view.MotionEvent
+import android.view.ScaleGestureDetector
 import android.widget.ImageView
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.FileProvider
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -22,6 +30,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
@@ -33,6 +42,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -66,8 +76,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.platform.LocalContext
@@ -78,6 +92,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.arkulz.arkmoney.data.Account
 import com.arkulz.arkmoney.data.Category
 import com.arkulz.arkmoney.data.Expense
@@ -85,6 +100,8 @@ import com.arkulz.arkmoney.data.TransactionType
 import com.arkulz.arkmoney.data.transactionType
 import com.arkulz.arkmoney.data.storeExpensePhoto
 import com.arkulz.arkmoney.data.createExpensePhotoTarget
+import com.arkulz.arkmoney.data.compressExpensePhoto
+import com.arkulz.arkmoney.data.saveExpensePhotoToGallery
 import java.io.File
 import java.time.Instant
 import java.time.LocalDate
@@ -109,11 +126,15 @@ fun ExpensesScreen(
     onAddExpense: (Long, Category?, String, Long, TransactionType, Long?) -> Unit,
     onUpdateExpense: (Expense) -> Unit,
     onDeleteExpense: (Expense) -> Unit,
+    onMoveCategory: (Category, Int) -> Unit,
+    hapticsEnabled: Boolean,
+    dailyLimitCents: Long?,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var calculator by remember { mutableStateOf(CalculatorState()) }
     var calculatorVisible by rememberSaveable { mutableStateOf(true) }
+    val calculatorVisibility = remember { MutableTransitionState(true) }
     var selectedCategoryId by rememberSaveable { mutableStateOf<Long?>(null) }
     var transactionTypeName by rememberSaveable { mutableStateOf(TransactionType.EXPENSE.name) }
     val transactionType = TransactionType.valueOf(transactionTypeName)
@@ -125,7 +146,11 @@ fun ExpensesScreen(
     var searchVisible by rememberSaveable { mutableStateOf(false) }
     var selectedExpense by remember { mutableStateOf<Expense?>(null) }
     var pendingCameraFile by remember { mutableStateOf<File?>(null) }
-    val visibleCategories = categories.filter { it.type == transactionType.name }
+    val haptic = LocalHapticFeedback.current
+    var displayedCategories by remember { mutableStateOf(categories) }
+    LaunchedEffect(categories) { displayedCategories = categories }
+    LaunchedEffect(calculatorVisible) { calculatorVisibility.targetState = calculatorVisible }
+    val visibleCategories = displayedCategories.filter { it.type == transactionType.name }
     val selectedCategory = visibleCategories.firstOrNull { it.id == selectedCategoryId }
         ?: visibleCategories.firstOrNull().also { selectedCategoryId = it?.id }
     val allAccountExpenses = expenses.filter { it.accountId == selectedAccount?.id || it.transferAccountId == selectedAccount?.id }
@@ -147,11 +172,13 @@ fun ExpensesScreen(
         val expense = selectedExpense
         val file = pendingCameraFile
         pendingCameraFile = null
-        if (saved && expense != null && file != null) {
-            if (expense.photoPath.isNotBlank() && expense.photoPath != file.absolutePath) runCatching { File(expense.photoPath).delete() }
-            val updated = expense.copy(photoPath = file.absolutePath)
-            onUpdateExpense(updated)
-            selectedExpense = updated
+        if (saved && expense != null && file != null) scope.launch {
+            runCatching { withContext(Dispatchers.IO) { compressExpensePhoto(file) } }
+                .onSuccess {
+                    if (expense.photoPath.isNotBlank() && expense.photoPath != file.absolutePath) runCatching { File(expense.photoPath).delete() }
+                    val updated = expense.copy(photoPath = file.absolutePath); onUpdateExpense(updated); selectedExpense = updated
+                }
+                .onFailure { file.delete(); Toast.makeText(context, "Не удалось обработать фотографию", Toast.LENGTH_SHORT).show() }
         } else file?.delete()
     }
 
@@ -164,6 +191,7 @@ fun ExpensesScreen(
         val date = LocalDate.now().minusDays(daysAgo.toLong())
         val timestamp = date.atTime(LocalTime.now()).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
         onAddExpense(cents, category, quickTitle.trim(), timestamp, transactionType, destination)
+        if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
         calculator = CalculatorState()
         quickTitle = ""
         titleEditorVisible = false
@@ -174,8 +202,8 @@ fun ExpensesScreen(
             searchVisible = it
             if (!it) searchQuery = ""
         }
-        ExpenseHistory(accountExpenses, categories, Modifier.weight(1f), searchVisible, onExpenseClick = { selectedExpense = it })
-        AnimatedVisibility(calculatorVisible) {
+        ExpenseHistory(accountExpenses, categories, Modifier.weight(1f), searchVisible, dailyLimitCents, onExpenseClick = { selectedExpense = it })
+        AnimatedVisibility(visibleState = calculatorVisibility) {
             EntryPanel(
                 calculator = calculator,
                 categories = visibleCategories,
@@ -192,10 +220,15 @@ fun ExpensesScreen(
                 titleEditorVisible = titleEditorVisible,
                 onTitleEditorVisibleChange = { titleEditorVisible = it },
                 onCategorySelected = { selectedCategoryId = it.id },
+                onMoveCategory = { category, direction ->
+                    val moved = reorderedCategoryType(displayedCategories, category.id, direction)
+                    displayedCategories = displayedCategories.filter { it.type != category.type } + moved
+                    onMoveCategory(category, direction)
+                },
+                hapticsEnabled = hapticsEnabled,
                 onDigit = { calculator = calculator.pressDigit(it) },
                 onDecimal = { calculator = calculator.pressDecimal() },
                 onOperation = { calculator = calculator.pressOperation(it) },
-                onEquals = { calculator = calculator.pressEquals() },
                 onClear = { calculator = CalculatorState() },
                 onBackspace = { calculator = calculator.pressBackspace() },
                 onCollapse = { calculatorVisible = false },
@@ -203,7 +236,7 @@ fun ExpensesScreen(
                 onChooseDay = { chooseExpenseDay = true },
             )
         }
-        if (!calculatorVisible) {
+        if (calculatorVisibility.isIdle && !calculatorVisibility.currentState && !calculatorVisibility.targetState) {
             Surface(Modifier.fillMaxWidth().clickable { calculatorVisible = true }, color = MaterialTheme.colorScheme.surfaceContainer, tonalElevation = 3.dp) {
                 Row(Modifier.padding(horizontal = 20.dp, vertical = 10.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.KeyboardArrowUp, null)
@@ -260,6 +293,12 @@ private fun BalanceHeader(
     onSearchVisibleChange: (Boolean) -> Unit,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
+    val searchFocusRequester = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    LaunchedEffect(searchVisible) {
+        if (searchVisible) { delay(120); searchFocusRequester.requestFocus(); keyboard?.show() }
+        else keyboard?.hide()
+    }
     val balance = account?.currentBalance(expenses) ?: 0
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
         Box(Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
@@ -272,7 +311,7 @@ private fun BalanceHeader(
                     DropdownMenu(menuOpen, { menuOpen = false }) { accounts.forEach { item -> DropdownMenuItem({ Column { Text(item.name); Text(formatMoney(item.currentBalance(expenses)), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } }, onClick = { onSelect(item); menuOpen = false }) } }
                 }
             }
-            IconButton({ onSearchVisibleChange(!searchVisible) }, Modifier.align(Alignment.CenterEnd)) {
+            IconButton({ if (searchVisible) keyboard?.hide(); onSearchVisibleChange(!searchVisible) }, Modifier.align(Alignment.CenterEnd)) {
                 Icon(if (searchVisible) Icons.Default.Close else Icons.Default.Search, if (searchVisible) "Закрыть поиск" else "Поиск")
             }
         }
@@ -280,7 +319,7 @@ private fun BalanceHeader(
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = onSearchQueryChange,
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp).focusRequester(searchFocusRequester),
                 placeholder = { Text("Название или сумма") },
                 singleLine = true,
                 shape = RoundedCornerShape(18.dp),
@@ -291,7 +330,7 @@ private fun BalanceHeader(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ExpenseHistory(expenses: List<Expense>, categories: List<Category>, modifier: Modifier, showDateAction: Boolean, onExpenseClick: (Expense) -> Unit) {
+private fun ExpenseHistory(expenses: List<Expense>, categories: List<Category>, modifier: Modifier, showDateAction: Boolean, dailyLimitCents: Long?, onExpenseClick: (Expense) -> Unit) {
     val groups = expenses.groupBy { it.localDate() }.entries.toList()
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -303,7 +342,7 @@ private fun ExpenseHistory(expenses: List<Expense>, categories: List<Category>, 
             Text("Выберите тип и введите сумму", color = MaterialTheme.colorScheme.onSurfaceVariant)
         } } else LazyColumn(Modifier.fillMaxWidth().weight(1f), state = listState) {
             groups.forEach { (date, dayExpenses) ->
-                item(key = "day-$date") { DayHeader(date, dayExpenses.sumOf { if (it.transactionType == TransactionType.INCOME) -it.amountCents else if (it.transactionType == TransactionType.EXPENSE) it.amountCents else 0L }) }
+                item(key = "day-$date") { DayHeader(date, dayExpenses.filter { it.transactionType == TransactionType.EXPENSE }.sumOf { it.amountCents }, dailyLimitCents) }
                 items(dayExpenses.size, key = { dayExpenses[it].id }) { index ->
                     val expense = dayExpenses[index]
                     ExpenseRow(expense, categories.firstOrNull { it.id == expense.categoryId }, onExpenseClick)
@@ -323,12 +362,12 @@ private fun ExpenseHistory(expenses: List<Expense>, categories: List<Category>, 
     }
 }
 
-@Composable private fun DayHeader(date: LocalDate, total: Long) {
+@Composable private fun DayHeader(date: LocalDate, total: Long, dailyLimitCents: Long?) {
     val today = LocalDate.now()
     val title = when (date) { today -> "Сегодня"; today.minusDays(1) -> "Вчера"; else -> date.format(DateTimeFormatter.ofPattern("d MMMM", Locale.forLanguageTag("ru"))) }
     Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainerLow).padding(horizontal = 20.dp, vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
         Text(title, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(formatMoney(total), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(if (date == today && dailyLimitCents != null && dailyLimitCents > 0) "${formatMoney(total)} / ${formatMoney(dailyLimitCents)}" else formatMoney(total), color = if (date == today && dailyLimitCents != null && total > dailyLimitCents) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -364,6 +403,7 @@ private fun ExpenseDetailDialog(
     var editDate by remember { mutableStateOf(false) }
     var editTime by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var showPhoto by remember { mutableStateOf(false) }
     val currentDateTime = Instant.ofEpochMilli(createdAt).atZone(ZoneId.systemDefault())
     val parsedAmount = parseMoneyCents(amount)
     Dialog(onDismissRequest = onDismiss) {
@@ -390,7 +430,7 @@ private fun ExpenseDetailDialog(
                     AndroidView(
                         factory = { ImageView(it).apply { scaleType = ImageView.ScaleType.CENTER_CROP } },
                         update = { it.setImageURI(Uri.fromFile(File(expense.photoPath))) },
-                        modifier = Modifier.fillMaxWidth().height(210.dp).clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceContainer),
+                        modifier = Modifier.fillMaxWidth().height(210.dp).clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceContainer).clickable { showPhoto = true },
                     )
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -417,6 +457,27 @@ private fun ExpenseDetailDialog(
         AlertDialog({ editTime = false }, title = { Text("Время операции") }, text = { TimePicker(picker) }, confirmButton = { TextButton({ createdAt = currentDateTime.toLocalDate().atTime(picker.hour, picker.minute).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(); editTime = false }) { Text("Готово") } }, dismissButton = { TextButton({ editTime = false }) { Text("Отмена") } })
     }
     if (confirmDelete) AlertDialog({ confirmDelete = false }, title = { Text("Удалить операцию?") }, text = { Text("Операция и прикреплённая фотография будут удалены без возможности восстановления.") }, confirmButton = { TextButton(onDelete) { Text("Удалить", color = MaterialTheme.colorScheme.error) } }, dismissButton = { TextButton({ confirmDelete = false }) { Text("Отмена") } })
+    if (showPhoto && expense.photoPath.isNotBlank()) {
+        val context = LocalContext.current
+        Dialog(onDismissRequest = { showPhoto = false }, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+            Surface(Modifier.fillMaxSize(), color = Color.Black, shape = RoundedCornerShape(0.dp)) {
+                Box(Modifier.fillMaxSize()) {
+                    AndroidView(
+                        factory = { ZoomablePhotoView(it) },
+                        update = { it.show(File(expense.photoPath)) },
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                    Row(Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(12.dp)) {
+                        TextButton({
+                            val saved = saveExpensePhotoToGallery(context, File(expense.photoPath))
+                            Toast.makeText(context, if (saved) "Фотография сохранена" else "Не удалось сохранить фотографию", Toast.LENGTH_SHORT).show()
+                        }) { Text("Сохранить", color = Color.White) }
+                        TextButton({ showPhoto = false }) { Text("Закрыть", color = Color.White) }
+                    }
+                }
+            }
+        }
+    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -437,10 +498,11 @@ private fun EntryPanel(
     titleEditorVisible: Boolean,
     onTitleEditorVisibleChange: (Boolean) -> Unit,
     onCategorySelected: (Category) -> Unit,
+    onMoveCategory: (Category, Int) -> Unit,
+    hapticsEnabled: Boolean,
     onDigit: (Char) -> Unit,
     onDecimal: () -> Unit,
     onOperation: (Char) -> Unit,
-    onEquals: () -> Unit,
     onClear: () -> Unit,
     onBackspace: () -> Unit,
     onCollapse: () -> Unit,
@@ -450,6 +512,8 @@ private fun EntryPanel(
     val titleFocusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
     val editorScope = rememberCoroutineScope()
+    val haptic = LocalHapticFeedback.current
+    fun feedback() { if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove) }
     fun closeTitleEditor() {
         keyboardController?.hide()
         editorScope.launch { delay(180); onTitleEditorVisibleChange(false) }
@@ -491,7 +555,7 @@ private fun EntryPanel(
                             }
                         }
                     }
-                } else Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) { categories.forEach { CategoryChip(it, it.id == selectedCategory?.id) { onCategorySelected(it) } } }
+                } else Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) { categories.forEach { category -> CategoryChip(category, category.id == selectedCategory?.id, { onCategorySelected(category); feedback() }, { direction -> onMoveCategory(category, direction); feedback() }) } }
                 IconButton(::collapseCalculator) { Icon(Icons.Default.KeyboardArrowDown, "Скрыть калькулятор") }
             }
             Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 3.dp), horizontalAlignment = Alignment.End) {
@@ -506,7 +570,7 @@ private fun EntryPanel(
                     label = { Text("Название операции") },
                     singleLine = true,
                     shape = RoundedCornerShape(16.dp),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
                     keyboardActions = KeyboardActions(onDone = { closeTitleEditor() }),
                     trailingIcon = { IconButton({ closeTitleEditor() }) { Icon(Icons.Default.Close, "Готово") } },
                 )
@@ -516,22 +580,80 @@ private fun EntryPanel(
                 }
             }
             if (!titleEditorVisible) {
-                val rows = listOf(listOf("C", "⌫", "÷", "×"), listOf("7", "8", "9", "−"), listOf("4", "5", "6", "+"), listOf("1", "2", "3", "="))
-                rows.forEach { row -> Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp)) { row.forEach { key -> CalculatorKey(key, Modifier.weight(1f)) {
-                when (key) { "C" -> onClear(); "⌫" -> onBackspace(); "÷", "×", "+" -> onOperation(key.first()); "−" -> onOperation('-'); "=" -> onEquals(); else -> onDigit(key.first()) }
-            } } } }
-                Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp)) {
-                    CalculatorKey("0", Modifier.weight(2f)) { onDigit('0') }
-                    CalculatorKey(",", Modifier.weight(1f)) { onDecimal() }
-                    val addShape = RoundedCornerShape(18.dp)
-                    Box(Modifier.weight(1f).height(52.dp).padding(3.dp).clip(addShape).background(MaterialTheme.colorScheme.primary).combinedClickable(enabled = calculator.amountCents() != null, onClick = onAdd, onLongClick = onChooseDay), contentAlignment = Alignment.Center) {
-                        Text("⏎", color = MaterialTheme.colorScheme.onPrimary, fontSize = 26.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                val rows = listOf(listOf("C", "⌫", "÷", "×"), listOf("7", "8", "9", "−"), listOf("4", "5", "6", "+"))
+                rows.forEach { row -> Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp)) { row.forEach { key ->
+                    CalculatorKey(key, Modifier.weight(1f)) {
+                        feedback(); when (key) { "C" -> onClear(); "⌫" -> onBackspace(); "÷", "×", "+" -> onOperation(key.first()); "−" -> onOperation('-'); else -> onDigit(key.first()) }
                     }
+                } } }
+                Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp)) {
+                    Column(Modifier.weight(3f)) {
+                        Row(Modifier.fillMaxWidth()) {
+                            listOf("1", "2", "3").forEach { key -> CalculatorKey(key, Modifier.weight(1f)) { feedback(); onDigit(key.first()) } }
+                        }
+                        Row(Modifier.fillMaxWidth()) {
+                            CalculatorKey("0", Modifier.weight(2f)) { feedback(); onDigit('0') }
+                            CalculatorKey(",", Modifier.weight(1f), fontSize = 17) { feedback(); onDecimal() }
+                        }
+                    }
+                    val shape = RoundedCornerShape(16.dp)
+                    Box(
+                        Modifier.weight(1f).height(88.dp).padding(3.dp).clip(shape)
+                            .background(MaterialTheme.colorScheme.primary)
+                            .combinedClickable(enabled = calculator.amountCents() != null, onClick = { feedback(); onAdd() }, onLongClick = { feedback(); onChooseDay() }),
+                        contentAlignment = Alignment.Center,
+                    ) { Icon(Icons.AutoMirrored.Filled.ArrowForward, "Добавить операцию", tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(27.dp)) }
                 }
             }
         }
     }
 }
 
-@Composable private fun CategoryChip(category: Category, selected: Boolean, onClick: () -> Unit) { val shape = RoundedCornerShape(16.dp); Column(Modifier.clip(shape).background(if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent).clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) { Text(category.emoji, fontSize = 17.sp); Text(category.name, fontSize = 11.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal) } }
-@Composable private fun CalculatorKey(label: String, modifier: Modifier, onClick: () -> Unit) { val shape = RoundedCornerShape(16.dp); Box(modifier.height(44.dp).padding(3.dp).clip(shape).background(MaterialTheme.colorScheme.surfaceContainerHigh).clickable(onClick = onClick), contentAlignment = Alignment.Center) { Text(label, fontSize = 20.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center) } }
+@Composable private fun CategoryChip(category: Category, selected: Boolean, onClick: () -> Unit, onMove: (Int) -> Unit) {
+    val shape = RoundedCornerShape(16.dp)
+    Column(
+        Modifier.clip(shape).background(if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
+            .pointerInput(category.id) {
+                var accumulated = 0f
+                detectDragGesturesAfterLongPress(
+                    onDragStart = { accumulated = 0f },
+                    onDrag = { change, amount ->
+                        change.consume(); accumulated += amount.x
+                        if (kotlin.math.abs(accumulated) > 44f) { onMove(if (accumulated > 0) 1 else -1); accumulated = 0f }
+                    },
+                )
+            }
+            .clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) { Text(category.emoji, fontSize = 17.sp); Text(category.name, fontSize = 11.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal) }
+}
+@Composable private fun CalculatorKey(label: String, modifier: Modifier, fontSize: Int = 20, onClick: () -> Unit) { val shape = RoundedCornerShape(16.dp); Box(modifier.height(44.dp).padding(3.dp).clip(shape).background(MaterialTheme.colorScheme.surfaceContainerHigh).clickable(onClick = onClick), contentAlignment = Alignment.Center) { Text(label, fontSize = fontSize.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center) } }
+
+private class ZoomablePhotoView(context: Context) : ImageView(context) {
+    private val transform = Matrix()
+    private var baseScale = 1f
+    private var currentScale = 1f
+    private val scaleDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+        override fun onScale(detector: ScaleGestureDetector): Boolean {
+            val next = (currentScale * detector.scaleFactor).coerceIn(baseScale, baseScale * 5f)
+            val factor = next / currentScale
+            transform.postScale(factor, factor, detector.focusX, detector.focusY)
+            currentScale = next; imageMatrix = transform; return true
+        }
+    })
+    private val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
+        override fun onDown(e: MotionEvent) = true
+        override fun onScroll(e1: MotionEvent?, e2: MotionEvent, distanceX: Float, distanceY: Float): Boolean { if (currentScale > baseScale) { transform.postTranslate(-distanceX, -distanceY); imageMatrix = transform }; return true }
+        override fun onDoubleTap(e: MotionEvent): Boolean { if (currentScale > baseScale * 1.1f) resetImage() else { transform.postScale(2f, 2f, e.x, e.y); currentScale *= 2f; imageMatrix = transform }; return true }
+    })
+    init { scaleType = ScaleType.MATRIX }
+    fun show(file: File) { setImageURI(Uri.fromFile(file)); post(::resetImage) }
+    private fun resetImage() {
+        val image = drawable ?: return
+        val sx = width.toFloat() / image.intrinsicWidth.coerceAtLeast(1); val sy = height.toFloat() / image.intrinsicHeight.coerceAtLeast(1)
+        baseScale = minOf(sx, sy); currentScale = baseScale; transform.reset(); transform.postScale(baseScale, baseScale)
+        transform.postTranslate((width - image.intrinsicWidth * baseScale) / 2f, (height - image.intrinsicHeight * baseScale) / 2f); imageMatrix = transform
+    }
+    override fun onTouchEvent(event: MotionEvent): Boolean { parent?.requestDisallowInterceptTouchEvent(true); scaleDetector.onTouchEvent(event); gestureDetector.onTouchEvent(event); if (event.action == MotionEvent.ACTION_UP) performClick(); return true }
+    override fun performClick(): Boolean { super.performClick(); return true }
+}

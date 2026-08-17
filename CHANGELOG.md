@@ -2,6 +2,44 @@
 
 All notable changes to ArkMoney are documented in this file.
 
+## 0.3.0 — 2026-08-18
+
+### Added / Добавлено
+
+- drag reordering for expense and income categories in Settings and by holding a
+  calculator category / сортировка категорий перетаскиванием в настройках и
+  удержанием категории в калькуляторе;
+- a large grouped emoji library / большая библиотека эмодзи по тематическим группам;
+- versioned `.arkmoney` backups containing accounts, categories, operations and
+  photos, with validated restore and an automatic safety copy / резервные копии
+  `.arkmoney` со счетами, категориями, операциями и фотографиями, проверкой и
+  страховочной копией;
+- optional daily spending limit display and configurable haptic feedback /
+  необязательное отображение дневного лимита и настройка виброотдачи;
+- full-screen zoomable photo viewing and saving to the Android gallery /
+  полноэкранный просмотр фотографий с масштабированием и сохранением в галерею.
+
+### Changed / Изменено
+
+- newly attached photos are resized, orientation-corrected, stripped of metadata
+  and compressed / новые фотографии уменьшаются, корректно поворачиваются,
+  очищаются от метаданных и сжимаются;
+- the category editor uses sentence capitalization and a Material 3 card list /
+  редактор категорий использует заглавную букву и карточки Material 3;
+- search focuses immediately and opens the system keyboard / поиск сразу получает
+  фокус и открывает системную клавиатуру;
+- the calculator no longer has Equals: Enter occupies its grid cell and keeps the
+  long-press date action / кнопка «Равно» удалена, Enter находится внутри сетки и
+  сохраняет выбор даты по долгому нажатию;
+- category deletion now transfers linked operations atomically and offers a
+  scrollable destination list / удаление категории атомарно переносит связанные
+  операции и показывает прокручиваемый список категорий назначения;
+- calculator layout, collapse animation, active tabs, category drag-and-drop and
+  photo controls were polished for Material 3 / улучшены раскладка и анимация
+  калькулятора, активные вкладки, перетаскивание категорий и элементы просмотра фото;
+- fresh installations receive a frequency-oriented default category set / новые
+  установки получают обновлённый набор категорий по частоте использования.
+
 ## 0.2.0 — 2026-08-16
 
 ### Added / Добавлено

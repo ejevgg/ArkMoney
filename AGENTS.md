@@ -27,6 +27,8 @@ Excel format or storage model without explicit approval and a migration plan.
 - Destructive actions must explain their scope and require confirmation.
 - Database schema changes require explicit Room migrations. Destructive fallback
   is not acceptable.
+- `.arkmoney` restore must validate the complete archive before replacing data
+  and must keep the pre-restore safety copy recoverable from the UI.
 
 ## Financial and transfer invariants
 
