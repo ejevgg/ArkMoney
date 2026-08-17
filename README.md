@@ -3,7 +3,7 @@
 ArkMoney is a private, local-first expense tracker for Android, built with
 Material 3.
 
-> Current release: **0.2.0**. Published APKs are available through GitHub
+> Current release: **0.3.0**. Published APKs are available through GitHub
 > Releases.
 
 ## Download
@@ -23,6 +23,8 @@ open the APK.
 - history grouped by day, search and date navigation;
 - week, month, quarter, year and custom-range analytics;
 - Excel export with account and category selection;
+- validated `.arkmoney` backup and restore, including private photos;
+- category drag-and-drop, a grouped emoji library and an optional daily limit;
 - system, light and dark themes;
 - Material 3 interface and Android 12 themed icon support.
 
@@ -30,7 +32,7 @@ open the APK.
 
 ArkMoney works without an account, analytics or network access. Financial data
 and attached photos remain in local application storage unless the user
-explicitly exports an Excel workbook.
+explicitly exports an Excel workbook, saves a photo or creates a backup.
 
 Uninstalling the application removes its local database and private photos.
 Export current data before uninstalling or changing devices.
@@ -61,12 +63,12 @@ compatible updates.
 - Jetpack Compose and Material 3;
 - Room;
 - Gradle Kotlin DSL;
-- XML-based `.xlsx` export without a network service; importer code is retained
-  for redesign but is not exposed in version 0.2.0.
+- XML-based `.xlsx` export without a network service;
+- validated ZIP-based `.arkmoney` backups with separate private photo entries.
 
 ## Project status
 
-ArkMoney 0.2.0 is the current stable local-first release. Excel import is
+ArkMoney 0.3.0 is the current stable local-first release. Excel import is
 temporarily unavailable while its interaction and validation flow is redesigned.
 See [CHANGELOG.md](CHANGELOG.md)
 for release notes.
@@ -83,7 +85,7 @@ for release notes.
 ArkMoney — локальное Android-приложение для приватного учёта расходов, доходов
 и переводов между счетами.
 
-> Текущая стабильная версия: **0.2.0**.
+> Текущая стабильная версия: **0.3.0**.
 
 ### Возможности
 
@@ -93,6 +95,8 @@ ArkMoney — локальное Android-приложение для приват
 - история по дням, поиск и переход к дате;
 - аналитика расходов и доходов за стандартные и произвольные периоды;
 - экспорт Excel с выбором счетов и категорий;
+- резервные копии `.arkmoney` со счетами, категориями, операциями и фотографиями;
+- сортировка категорий перетаскиванием, библиотека эмодзи и дневной лимит;
 - светлая, тёмная и системная темы Material 3.
 
 Импорт Excel временно недоступен до переработки интерфейса и проверки данных.

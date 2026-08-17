@@ -34,9 +34,9 @@ must use explicit migrations and preserve existing rows.
 
 ## Expense photos
 
-`data/ExpensePhotoStorage.kt` copies user-selected images into private app
-storage. Room stores only the resulting private path. Photos are intentionally
-excluded from Excel workbooks.
+`data/ExpensePhotoStorage.kt` normalizes orientation, resizes and compresses
+user-selected images into private app storage. Room stores only the resulting
+private path. Photos are excluded from Excel but included in ArkMoney backups.
 
 ## Calculator and financial logic
 
@@ -57,6 +57,11 @@ descriptions, category labels and monetary amounts.
 
 Format compatibility is guarded by JVM round-trip tests. Import must validate
 input before database mutation when it returns to the product.
+
+`ArkMoneyBackup.kt` owns the versioned `.arkmoney` ZIP format. Text fields are
+Base64 encoded inside tabular entries and photos use separate archive entries.
+Restore validates IDs, account/category references, types, amounts, paths and
+archive size before Room is modified.
 
 ## Verification boundaries
 
@@ -82,6 +87,10 @@ ArkMoney — одномодульное Kotlin-приложение. Jetpack Com
 `ExcelExporter` создаёт `.xlsx` с выбранными счетами и категориями. Код
 `ExcelImporter` сохранён для будущей переработки, но импорт не показывается в
 интерфейсе. Тесты продолжают защищать формат от регрессий.
+
+`ArkMoneyBackup` создаёт версионируемый ZIP-файл `.arkmoney` с данными и
+фотографиями. До изменения Room проверяются пути, размеры, идентификаторы и все
+ссылки между операциями, счетами и категориями.
 
 JVM-тесты проверяют калькулятор, балансы, периоды, поиск и Excel. Android Lint
 проверяет Compose и платформенную интеграцию. Камера, выбор документов, маски

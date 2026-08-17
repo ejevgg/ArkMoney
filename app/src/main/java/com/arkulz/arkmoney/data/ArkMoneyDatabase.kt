@@ -78,15 +78,17 @@ abstract class ArkMoneyDatabase : RoomDatabase() {
         }
 
         private val defaultCategories = listOf(
-            Triple("Другое", "•••", 0), Triple("Продукты", "🛒", 1),
-            Triple("Кафе", "☕", 2), Triple("Транспорт", "🚕", 3),
-            Triple("Дом", "🏠", 4), Triple("Здоровье", "♥", 5),
-            Triple("Развлечения", "🎬", 6),
+            Triple("Другое", "•••", 11), Triple("Продукты", "🛒", 0),
+            Triple("Транспорт", "🚕", 1), Triple("Кафе и доставка", "☕", 2),
+            Triple("Покупки", "🛍️", 3), Triple("Дом", "🏠", 4),
+            Triple("Здоровье", "💊", 5), Triple("Развлечения", "🎬", 6),
+            Triple("Связь и подписки", "📱", 7), Triple("Счета и услуги", "🧾", 8),
+            Triple("Подарки", "🎁", 9), Triple("Путешествия", "✈️", 10),
         )
         private val incomeCategories = listOf(
-            Triple("Зарплата", "💼", 0), Triple("Подработка", "🛠️", 1),
-            Triple("Подарки", "🎁", 2), Triple("Проценты", "📈", 3),
-            Triple("Другое поступление", "💰", 4),
+            Triple("Зарплата", "💼", 0), Triple("Дополнительный доход", "💰", 1),
+            Triple("Возврат", "↩️", 2), Triple("Подарок", "🎁", 3),
+            Triple("Инвестиции", "📈", 4), Triple("Другое", "•••", 5),
         )
 
         private fun seedDefaults(db: SupportSQLiteDatabase) {
