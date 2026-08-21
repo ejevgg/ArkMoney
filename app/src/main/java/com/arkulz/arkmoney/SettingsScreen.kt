@@ -2,6 +2,7 @@ package com.arkulz.arkmoney
 
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.BorderStroke
@@ -91,9 +92,12 @@ fun SettingsScreen(
     accounts: List<Account>,
     themeMode: ThemeMode,
     onThemeModeChange: (ThemeMode) -> Unit,
+    appLanguage: AppLanguage,
+    onAppLanguageChange: (AppLanguage) -> Unit,
     onAddCategory: (String, String, TransactionType) -> Unit,
     onUpdateCategory: (Category) -> Unit,
     onDeleteCategory: (Category, Category, (Boolean) -> Unit) -> Unit,
+    onDeleteCategoryWithExpenses: (Category, (Boolean) -> Unit) -> Unit,
     onAddAccount: (String, Long) -> Unit,
     onUpdateAccount: (Account) -> Unit,
     onDeleteAccount: (Account) -> Unit,
@@ -101,6 +105,8 @@ fun SettingsScreen(
     onDeleteDemoData: () -> Unit,
     hapticsEnabled: Boolean,
     onHapticsEnabledChange: (Boolean) -> Unit,
+    showCategoryEmoji: Boolean,
+    onShowCategoryEmojiChange: (Boolean) -> Unit,
     dailyLimitEnabled: Boolean,
     dailyLimitCents: Long,
     onDailyLimitChange: (Boolean, Long) -> Unit,
@@ -130,6 +136,13 @@ fun SettingsScreen(
     var displayedCategories by remember { mutableStateOf(categories) }
     LaunchedEffect(categories) { displayedCategories = categories }
     val uriHandler = LocalUriHandler.current
+    val fileAccessError = tr("Нет доступа к файлу", "File access denied")
+    val excelSavedText = tr("Excel-файл сохранён", "Excel file saved")
+    val exportErrorText = tr("Не удалось экспортировать данные", "Could not export data")
+    val backupSavedText = tr("Резервная копия сохранена", "Backup saved")
+    val backupCreateErrorText = tr("Не удалось создать резервную копию", "Could not create backup")
+    val backupOpenErrorText = tr("Не удалось открыть копию", "Could not open backup")
+    val safetyBackupErrorText = tr("Страховочная копия повреждена", "Safety backup is damaged")
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")) { uri ->
         if (uri != null) scope.launch {
             val succeeded = withContext(Dispatchers.IO) {
@@ -141,50 +154,68 @@ fun SettingsScreen(
                 }
                 val selectedCategories = categories.filter { it.id in exportCategoryIds }
                 val selectedAccounts = accounts.filter { it.id in exportAccountIds }
-                runCatching { context.contentResolver.openOutputStream(uri)?.use { ExcelExporter.write(it, selectedExpenses, selectedCategories, selectedAccounts) } ?: error("Нет доступа к файлу") }.isSuccess
+                runCatching { context.contentResolver.openOutputStream(uri)?.use { ExcelExporter.write(it, selectedExpenses, selectedCategories, selectedAccounts) } ?: error(fileAccessError) }.isSuccess
             }
-            Toast.makeText(context, if (succeeded) "Excel-файл сохранён" else "Не удалось экспортировать данные", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, if (succeeded) excelSavedText else exportErrorText, Toast.LENGTH_SHORT).show()
         }
     }
     val backupLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
-        if (uri != null) scope.launch { val ok = withContext(Dispatchers.IO) { runCatching { context.contentResolver.openOutputStream(uri)?.use { ArkMoneyBackup.write(it, accounts, categories, expenses) } ?: error("Нет доступа к файлу") }.isSuccess }; Toast.makeText(context, if (ok) "Резервная копия сохранена" else "Не удалось создать резервную копию", Toast.LENGTH_SHORT).show() }
+        if (uri != null) scope.launch { val ok = withContext(Dispatchers.IO) { runCatching { context.contentResolver.openOutputStream(uri)?.use { ArkMoneyBackup.write(it, accounts, categories, expenses) } ?: error(fileAccessError) }.isSuccess }; Toast.makeText(context, if (ok) backupSavedText else backupCreateErrorText, Toast.LENGTH_SHORT).show() }
     }
     val restoreLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) scope.launch { withContext(Dispatchers.IO) { runCatching { context.contentResolver.openInputStream(uri)?.use(ArkMoneyBackup::read) ?: error("Нет доступа к файлу") } }.onSuccess { pendingBackup = it }.onFailure { Toast.makeText(context, "Не удалось открыть копию: ${it.message}", Toast.LENGTH_LONG).show() } }
+        if (uri != null) scope.launch { withContext(Dispatchers.IO) { runCatching { context.contentResolver.openInputStream(uri)?.use(ArkMoneyBackup::read) ?: error(fileAccessError) } }.onSuccess { pendingBackup = it }.onFailure { Toast.makeText(context, "$backupOpenErrorText: ${it.message}", Toast.LENGTH_LONG).show() } }
     }
+    BackHandler(showTesting) { showTesting = false }
 
     if (showTesting) {
         LazyColumn(modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-            item { Row(verticalAlignment = Alignment.CenterVertically) { IconButton({ showTesting = false }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Назад") }; Text("Тестирование", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold) } }
-            item { SettingsSection("Демо-данные") {
-                Text("Создаёт отдельный демо-счёт с реалистичными расходами и доходами за последние 365 дней.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Button({ confirmDemoFill = true }, Modifier.padding(top = 12.dp)) { Text("Заполнить демо-данными за год") }
-                if (expenses.any { it.isDemo } || accounts.any { it.isDemo }) TextButton({ confirmDemoDelete = true }) { Text("Удалить демо-данные", color = MaterialTheme.colorScheme.error) }
+            item { Row(verticalAlignment = Alignment.CenterVertically) { IconButton({ showTesting = false }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, tr("Назад", "Back")) }; Text(tr("Тестирование", "Testing"), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold) } }
+            item { SettingsSection(tr("Демо-данные", "Demo data")) {
+                Text(tr("Создаёт отдельный демо-счёт с реалистичными расходами и доходами за последние 365 дней.", "Creates a separate demo account with realistic expenses and income for the last 365 days."), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Button({ confirmDemoFill = true }, Modifier.padding(top = 12.dp)) { Text(tr("Заполнить демо-данными за год", "Generate one year of demo data")) }
+                if (expenses.any { it.isDemo } || accounts.any { it.isDemo }) TextButton({ confirmDemoDelete = true }) { Text(tr("Удалить демо-данные", "Delete demo data"), color = MaterialTheme.colorScheme.error) }
             } }
         }
-        if (confirmDemoFill) ConfirmDelete("Заполнить данные за год?", "Существующие демо-данные будут заменены. Личные расходы не изменятся.", { confirmDemoFill = false }, confirmLabel = "Создать", destructive = false) { onGenerateDemoData(); confirmDemoFill = false }
-        if (confirmDemoDelete) ConfirmDelete("Удалить демо-данные?", "Будут удалены только созданные для тестирования расходы и демо-счёт.", { confirmDemoDelete = false }) { onDeleteDemoData(); confirmDemoDelete = false }
+        if (confirmDemoFill) ConfirmDelete(tr("Заполнить данные за год?", "Generate a year of data?"), tr("Существующие демо-данные будут заменены. Личные расходы не изменятся.", "Existing demo data will be replaced. Personal operations will not change."), { confirmDemoFill = false }, confirmLabel = tr("Создать", "Create"), destructive = false) { onGenerateDemoData(); confirmDemoFill = false }
+        if (confirmDemoDelete) ConfirmDelete(tr("Удалить демо-данные?", "Delete demo data?"), tr("Будут удалены только созданные для тестирования расходы и демо-счёт.", "Only generated demo operations and the demo account will be deleted."), { confirmDemoDelete = false }) { onDeleteDemoData(); confirmDemoDelete = false }
         return
     }
 
     LazyColumn(modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-        item { Text("Настройки", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold) }
+        item { Text(tr("Настройки", "Settings"), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold) }
         item {
-            SettingsSection("Оформление") {
+            SettingsSection(tr("Оформление", "Appearance")) {
                 ThemeMode.entries.forEach { mode ->
-                    val label = when (mode) { ThemeMode.SYSTEM -> "Как на устройстве"; ThemeMode.LIGHT -> "Светлая"; ThemeMode.DARK -> "Тёмная" }
+                    val label = when (mode) { ThemeMode.SYSTEM -> tr("Как на устройстве", "Use device theme"); ThemeMode.LIGHT -> tr("Светлая", "Light"); ThemeMode.DARK -> tr("Тёмная", "Dark") }
                     Row(Modifier.fillMaxWidth().clickable { onThemeModeChange(mode) }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                         RadioButton(themeMode == mode, { onThemeModeChange(mode) })
                         Text(label, Modifier.padding(start = 8.dp))
                     }
                 }
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("Виброотдача", fontWeight = FontWeight.Medium); Text("Клавиатура и сортировка категорий", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }; Switch(hapticsEnabled, onHapticsEnabledChange) }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text(tr("Виброотдача", "Haptic feedback"), fontWeight = FontWeight.Medium); Text(tr("Клавиатура и сортировка категорий", "Calculator and category ordering"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }; Switch(hapticsEnabled, onHapticsEnabledChange) }
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text(tr("Эмодзи в калькуляторе", "Emoji in calculator"), fontWeight = FontWeight.Medium); Text(tr("Скрывает иконки только на панели быстрого ввода", "Hide icons only on the quick-entry panel"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }; Switch(showCategoryEmoji, onShowCategoryEmojiChange) }
             }
         }
         item {
-            SettingsSection("Дневной лимит") {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text("Показывать дневной лимит", fontWeight = FontWeight.Medium); Text("Лимит не запрещает добавлять расходы", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }; Switch(dailyLimitEnabled, { enabled -> onDailyLimitChange(enabled, parseMoneyCents(dailyLimitText) ?: dailyLimitCents) }) }
+            SettingsSection(tr("Язык", "Language")) {
+                AppLanguage.entries.forEach { language ->
+                    val label = when (language) {
+                        AppLanguage.SYSTEM -> tr("Как на устройстве", "Use device language")
+                        AppLanguage.RUSSIAN -> "Русский"
+                        AppLanguage.ENGLISH -> "English"
+                    }
+                    Row(Modifier.fillMaxWidth().clickable { onAppLanguageChange(language) }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        RadioButton(appLanguage == language, { onAppLanguageChange(language) })
+                        Text(label, Modifier.padding(start = 8.dp))
+                    }
+                }
+            }
+        }
+        item {
+            SettingsSection(tr("Дневной лимит", "Daily limit")) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text(tr("Показывать дневной лимит", "Show daily limit"), fontWeight = FontWeight.Medium); Text(tr("Лимит не запрещает добавлять расходы", "The limit does not block expenses"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }; Switch(dailyLimitEnabled, { enabled -> onDailyLimitChange(enabled, parseMoneyCents(dailyLimitText) ?: dailyLimitCents) }) }
                 if (dailyLimitEnabled) OutlinedTextField(
                     value = dailyLimitText,
                     onValueChange = { value ->
@@ -198,10 +229,10 @@ fun SettingsScreen(
                         dailyLimitFocused = state.isFocused
                         if (!state.isFocused) parseMoneyCents(dailyLimitText)?.let { onDailyLimitChange(true, it) }
                     },
-                    label = { Text("Лимит на день") },
-                    placeholder = { Text("Например, 1 500") },
+                    label = { Text(tr("Лимит на день", "Daily limit")) },
+                    placeholder = { Text(tr("Например, 1 500", "For example, 1,500")) },
                     suffix = { Text("₽") },
-                    supportingText = { Text("Покажем прогресс рядом с расходами за день") },
+                    supportingText = { Text(tr("Покажем прогресс рядом с расходами за день", "Progress is shown next to the daily total")) },
                     singleLine = true,
                     shape = RoundedCornerShape(16.dp),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
@@ -210,18 +241,18 @@ fun SettingsScreen(
             }
         }
         item {
-            SettingsSection("Счета") {
+            SettingsSection(tr("Счета", "Accounts")) {
                 accounts.forEach { account ->
                     ManageRow(account.name, formatMoney(account.currentBalance(expenses)), { accountEditor = account }, if (accounts.size > 1) {{ deleteAccount = account }} else null)
                 }
-                TextButton({ addingAccount = true }) { Text("+ Добавить счёт") }
+                TextButton({ addingAccount = true }) { Text(tr("+ Добавить счёт", "+ Add account")) }
             }
         }
         item {
-            SettingsSection("Категории") {
-                Text("Удерживайте карточку и перетаскивайте, чтобы изменить порядок.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 10.dp))
+            SettingsSection(tr("Категории", "Categories")) {
+                Text(tr("Удерживайте карточку и перетаскивайте, чтобы изменить порядок.", "Hold and drag a card to change its order."), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 10.dp))
                 TransactionType.entries.filter { it != TransactionType.TRANSFER }.forEach { type ->
-                    Text(if (type == TransactionType.EXPENSE) "Расходы" else "Доходы", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                    Text(if (type == TransactionType.EXPENSE) tr("Расходы", "Expenses") else tr("Доходы", "Income"), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
                     ReorderableCategoryList(
                         categories = displayedCategories.filter { it.type == type.name },
                         hapticsEnabled = hapticsEnabled,
@@ -232,19 +263,19 @@ fun SettingsScreen(
                         },
                     )
                 }
-                TextButton({ addingCategory = true }) { Text("+ Добавить категорию") }
+                TextButton({ addingCategory = true }) { Text(tr("+ Добавить категорию", "+ Add category")) }
             }
         }
         item {
-            SettingsSection("Данные") {
-                Text("Все данные хранятся только на устройстве.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
-                Button({ showExport = true }, modifier = Modifier.padding(top = 12.dp)) { Text("Экспортировать в Excel") }
-                TextButton({ backupLauncher.launch("ArkMoney-${LocalDate.now()}.arkmoney") }) { Text("Создать резервную копию") }
-                TextButton({ restoreLauncher.launch(arrayOf("application/zip", "application/octet-stream", "*/*")) }) { Text("Восстановить из копии") }
-                if (File(context.filesDir, "last_before_restore.arkmoney").isFile) TextButton({ scope.launch { withContext(Dispatchers.IO) { runCatching { File(context.filesDir, "last_before_restore.arkmoney").inputStream().use(ArkMoneyBackup::read) } }.onSuccess { pendingBackup = it }.onFailure { Toast.makeText(context, "Страховочная копия повреждена", Toast.LENGTH_LONG).show() } } }) { Text("Отменить последнее восстановление") }
+            SettingsSection(tr("Данные", "Data")) {
+                Text(tr("Все данные хранятся только на устройстве.", "All data is stored only on this device."), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+                Button({ showExport = true }, modifier = Modifier.padding(top = 12.dp)) { Text(tr("Экспортировать в Excel", "Export to Excel")) }
+                TextButton({ backupLauncher.launch("ArkMoney-${LocalDate.now()}.arkmoney") }) { Text(tr("Создать резервную копию", "Create backup")) }
+                TextButton({ restoreLauncher.launch(arrayOf("application/zip", "application/octet-stream", "*/*")) }) { Text(tr("Восстановить из копии", "Restore backup")) }
+                if (File(context.filesDir, "last_before_restore.arkmoney").isFile) TextButton({ scope.launch { withContext(Dispatchers.IO) { runCatching { File(context.filesDir, "last_before_restore.arkmoney").inputStream().use(ArkMoneyBackup::read) } }.onSuccess { pendingBackup = it }.onFailure { Toast.makeText(context, safetyBackupErrorText, Toast.LENGTH_LONG).show() } } }) { Text(tr("Отменить последнее восстановление", "Undo last restore")) }
             }
         }
-        item { Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) { TextButton({ uriHandler.openUri("https://github.com/ejevgg/ArkMoney") }) { Text("GitHub") }; Text("ArkMoney 0.3.0", Modifier.clickable { val next = nextVersionTap(versionTaps); versionTaps = next.first; showTesting = next.second }.padding(vertical = 12.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center) } }
+        item { Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) { TextButton({ uriHandler.openUri("https://github.com/ejevgg/ArkMoney") }) { Text("GitHub") }; Text("ArkMoney 0.4.0", Modifier.clickable { val next = nextVersionTap(versionTaps); versionTaps = next.first; showTesting = next.second }.padding(vertical = 12.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center) } }
     }
 
     val editingCategory = categoryEditor
@@ -279,10 +310,12 @@ fun SettingsScreen(
                     if (success) deleteCategory = null
                 }
             },
+            expenseCount = expenses.count { it.categoryId == category.id },
+            onDeleteWithExpenses = { completed -> onDeleteCategoryWithExpenses(category) { success -> completed(success); if (success) deleteCategory = null } },
         )
     }
-    deleteAccount?.let { account -> val count = expenses.count { it.accountId == account.id || it.transferAccountId == account.id }; ConfirmDelete("Удалить счёт «${account.name}»?", "Будут удалены счёт и $count связанных операций вместе с фотографиями. Отменить действие нельзя.", { deleteAccount = null }) { onDeleteAccount(account); deleteAccount = null } }
-    pendingBackup?.let { archive -> ConfirmDelete("Восстановить резервную копию?", "Счета: ${archive.accounts.size}, категории: ${archive.categories.size}, операции: ${archive.expenses.size}, фотографии: ${archive.photos.size}. Текущие данные будут заменены, а их страховочная копия сохранится внутри приложения.", { pendingBackup = null }, confirmLabel = "Восстановить", destructive = true) { onRestoreBackup(archive); pendingBackup = null } }
+    deleteAccount?.let { account -> val count = expenses.count { it.accountId == account.id || it.transferAccountId == account.id }; ConfirmDelete(tr("Удалить счёт «${account.name}»?", "Delete account “${account.name}”?"), tr("Будут удалены счёт и $count связанных операций вместе с фотографиями. Отменить действие нельзя.", "The account and $count linked operations with photos will be deleted. This cannot be undone."), { deleteAccount = null }) { onDeleteAccount(account); deleteAccount = null } }
+    pendingBackup?.let { archive -> ConfirmDelete(tr("Восстановить резервную копию?", "Restore backup?"), tr("Счета: ${archive.accounts.size}, категории: ${archive.categories.size}, операции: ${archive.expenses.size}, фотографии: ${archive.photos.size}. Текущие данные будут заменены, а их страховочная копия сохранится внутри приложения.", "Accounts: ${archive.accounts.size}, categories: ${archive.categories.size}, operations: ${archive.expenses.size}, photos: ${archive.photos.size}. Current data will be replaced after an internal safety copy is saved."), { pendingBackup = null }, confirmLabel = tr("Восстановить", "Restore"), destructive = true) { onRestoreBackup(archive); pendingBackup = null } }
     if (showExport) ExportDialog(
         accounts = accounts,
         expenses = expenses,
@@ -311,16 +344,16 @@ private fun ExportDialog(
     var categoriesExpanded by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Экспорт в Excel") },
+        title = { Text(tr("Экспорт в Excel", "Excel export")) },
         text = { Column(Modifier.heightIn(max = 480.dp).verticalScroll(androidx.compose.foundation.rememberScrollState())) {
-            Text("Счета", style = MaterialTheme.typography.titleSmall)
+            Text(tr("Счета", "Accounts"), style = MaterialTheme.typography.titleSmall)
             accounts.forEach { account -> Row(Modifier.fillMaxWidth().clickable { onAccountToggle(account.id) }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) { Checkbox(account.id in selectedAccountIds, { onAccountToggle(account.id) }); Column { Text(account.name); Text(formatMoney(account.currentBalance(expenses)), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } } }
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
-            TextButton({ categoriesExpanded = !categoriesExpanded }, Modifier.align(Alignment.End)) { Text(if (categoriesExpanded) "Скрыть категории" else "Выбрать категории (${selectedCategoryIds.size})") }
+            TextButton({ categoriesExpanded = !categoriesExpanded }, Modifier.align(Alignment.End)) { Text(if (categoriesExpanded) tr("Скрыть категории", "Hide categories") else tr("Выбрать категории (${selectedCategoryIds.size})", "Select categories (${selectedCategoryIds.size})")) }
             if (categoriesExpanded) categories.forEach { category -> Row(Modifier.fillMaxWidth().clickable { onCategoryToggle(category.id) }.padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) { Checkbox(category.id in selectedCategoryIds, { onCategoryToggle(category.id) }); Text("${category.emoji}  ${category.name}") } }
         } },
-        confirmButton = { TextButton(onExport, enabled = selectedAccountIds.isNotEmpty()) { Text("Экспортировать") } },
-        dismissButton = { TextButton(onDismiss) { Text("Отмена") } },
+        confirmButton = { TextButton(onExport, enabled = selectedAccountIds.isNotEmpty()) { Text(tr("Экспортировать", "Export")) } },
+        dismissButton = { TextButton(onDismiss) { Text(tr("Отмена", "Cancel")) } },
     )
 }
 
@@ -334,8 +367,8 @@ private fun ExportDialog(
 @Composable private fun ManageRow(title: String, subtitle: String?, onEdit: () -> Unit, onDelete: (() -> Unit)?) {
     Row(Modifier.fillMaxWidth().padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) { Text(title, fontWeight = FontWeight.Medium); if (subtitle != null) Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        TextButton(onEdit) { Text("Изменить") }
-        if (onDelete != null) TextButton(onDelete) { Text("Удалить", color = MaterialTheme.colorScheme.error) }
+        TextButton(onEdit) { Text(tr("Изменить", "Edit")) }
+        if (onDelete != null) TextButton(onDelete) { Text(tr("Удалить", "Delete"), color = MaterialTheme.colorScheme.error) }
     }
     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .45f))
 }
@@ -433,23 +466,23 @@ private fun ReorderableCategoryList(
     var type by remember(category) { mutableStateOf(category?.let { TransactionType.valueOf(it.type) } ?: TransactionType.EXPENSE) }
     var emojiOpen by remember { mutableStateOf(false) }
     var emojiGroup by remember { mutableStateOf(categoryEmojiGroups.first()) }
-    AlertDialog(onDismiss, title = { Text(if (category == null) "Новая категория" else "Изменить категорию") }, text = {
+    AlertDialog(onDismiss, title = { Text(if (category == null) tr("Новая категория", "New category") else tr("Изменить категорию", "Edit category")) }, text = {
         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 androidx.compose.material3.Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.clickable { emojiOpen = !emojiOpen }) { Text(emoji, Modifier.padding(16.dp), style = MaterialTheme.typography.headlineMedium) }
-                OutlinedTextField(name, { name = it }, modifier = Modifier.weight(1f), label = { Text("Название") }, singleLine = true, shape = RoundedCornerShape(16.dp), keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences))
+                OutlinedTextField(name, { name = it }, modifier = Modifier.weight(1f), label = { Text(tr("Название", "Name")) }, singleLine = true, shape = RoundedCornerShape(16.dp), keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences))
             }
-            if (category == null) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf(TransactionType.EXPENSE to "Расход", TransactionType.INCOME to "Доход").forEach { (value, label) -> SelectionTab(label, type == value, Modifier.weight(1f)) { type = value } } }
-            TextButton({ emojiOpen = !emojiOpen }) { Text(if (emojiOpen) "Скрыть библиотеку эмодзи" else "Выбрать эмодзи") }
+            if (category == null) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf(TransactionType.EXPENSE to tr("Расход", "Expense"), TransactionType.INCOME to tr("Доход", "Income")).forEach { (value, label) -> SelectionTab(label, type == value, Modifier.weight(1f)) { type = value } } }
+            TextButton({ emojiOpen = !emojiOpen }) { Text(if (emojiOpen) tr("Скрыть библиотеку эмодзи", "Hide emoji library") else tr("Выбрать эмодзи", "Choose emoji")) }
             if (emojiOpen) androidx.compose.material3.Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) { Column(Modifier.padding(8.dp)) {
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) { categoryEmojiGroups.forEach { group -> SelectionTab(group.title, group == emojiGroup) { emojiGroup = group } } }
                 LazyVerticalGrid(GridCells.Fixed(6), Modifier.fillMaxWidth().heightIn(min = 180.dp, max = 260.dp)) { items(emojiGroup.emojis) { item -> Text(item, Modifier.clip(RoundedCornerShape(12.dp)).background(if (item == emoji) MaterialTheme.colorScheme.primaryContainer else androidx.compose.ui.graphics.Color.Transparent).clickable { emoji = item }.padding(9.dp), style = MaterialTheme.typography.titleLarge, textAlign = TextAlign.Center) } }
             } }
         }
-    }, confirmButton = { TextButton({ if (name.isNotBlank()) onSave(name.trim(), emoji.ifBlank { "•••" }, type) }) { Text("Сохранить") } }, dismissButton = {
+    }, confirmButton = { TextButton({ if (name.isNotBlank()) onSave(name.trim(), emoji.ifBlank { "•••" }, type) }) { Text(tr("Сохранить", "Save")) } }, dismissButton = {
         Row {
-            if (onDelete != null) TextButton(onClick = onDelete) { Text("Удалить", color = MaterialTheme.colorScheme.error) }
-            TextButton(onClick = onDismiss) { Text("Отмена") }
+            if (onDelete != null) TextButton(onClick = onDelete) { Text(tr("Удалить", "Delete"), color = MaterialTheme.colorScheme.error) }
+            TextButton(onClick = onDismiss) { Text(tr("Отмена", "Cancel")) }
         }
     })
 }
@@ -465,15 +498,16 @@ private fun ReorderableCategoryList(
     ) { Text(label, Modifier.padding(horizontal = 13.dp, vertical = 9.dp), textAlign = TextAlign.Center, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal) }
 }
 
-@Composable private fun CategoryDeleteDialog(category: Category, replacements: List<Category>, onDismiss: () -> Unit, onConfirm: (Category, (Boolean) -> Unit) -> Unit) {
+@Composable private fun CategoryDeleteDialog(category: Category, replacements: List<Category>, onDismiss: () -> Unit, onConfirm: (Category, (Boolean) -> Unit) -> Unit, expenseCount: Int, onDeleteWithExpenses: ((Boolean) -> Unit) -> Unit) {
     var replacement by remember(category.id) { mutableStateOf(replacements.firstOrNull()) }
     var deleting by remember(category.id) { mutableStateOf(false) }
+    var confirmDeleteAll by remember(category.id) { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = { if (!deleting) onDismiss() },
-        title = { Text("Удалить «${category.name}»?") },
+        title = { Text(tr("Удалить «${category.name}»?", "Delete “${category.name}”?")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Все операции этой категории будут перенесены в выбранную категорию.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(tr("Все операции этой категории будут перенесены в выбранную категорию.", "All operations in this category will be moved to the selected category."), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 LazyColumn(
                     modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -501,8 +535,15 @@ private fun ReorderableCategoryList(
                 deleting = true
                 onConfirm(target) { deleting = false }
             }
-        }, enabled = replacement != null && !deleting) { Text(if (deleting) "Удаление…" else "Перенести и удалить") } },
-        dismissButton = { TextButton(onDismiss, enabled = !deleting) { Text("Отмена") } },
+        }, enabled = replacement != null && !deleting) { Text(if (deleting) tr("Удаление…", "Deleting…") else tr("Перенести и удалить", "Move and delete")) } },
+        dismissButton = { Row { TextButton({ confirmDeleteAll = true }, enabled = !deleting) { Text(tr("Удалить всё", "Delete all"), color = MaterialTheme.colorScheme.error) }; TextButton(onDismiss, enabled = !deleting) { Text(tr("Отмена", "Cancel")) } } },
+    )
+    if (confirmDeleteAll) AlertDialog(
+        onDismissRequest = { confirmDeleteAll = false },
+        title = { Text(tr("Удалить категорию и операции?", "Delete category and operations?")) },
+        text = { Text(tr("Будут безвозвратно удалены категория «${category.name}», $expenseCount операций и прикреплённые к ним фотографии.", "The category “${category.name}”, $expenseCount operations, and their attached photos will be permanently deleted.")) },
+        confirmButton = { TextButton({ confirmDeleteAll = false; deleting = true; onDeleteWithExpenses { deleting = false } }) { Text(tr("Удалить всё", "Delete all"), color = MaterialTheme.colorScheme.error) } },
+        dismissButton = { TextButton({ confirmDeleteAll = false }) { Text(tr("Отмена", "Cancel")) } },
     )
 }
 
@@ -510,16 +551,16 @@ private fun ReorderableCategoryList(
     val spent = account?.let { selected -> expenses.filter { it.accountId == selected.id }.sumOf { it.amountCents } } ?: 0
     var name by remember(account) { mutableStateOf(account?.name ?: "") }
     var balance by remember(account) { mutableStateOf(account?.let { ((it.openingBalanceCents - spent) / 100.0).toString() } ?: "0") }
-    AlertDialog(onDismiss, title = { Text(if (account == null) "Новый счёт" else "Изменить счёт") }, text = {
+    AlertDialog(onDismiss, title = { Text(if (account == null) tr("Новый счёт", "New account") else tr("Изменить счёт", "Edit account")) }, text = {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            OutlinedTextField(name, { name = it }, label = { Text("Название") }, singleLine = true)
-            OutlinedTextField(balance, { balance = it.filter { char -> char.isDigit() || char == ',' || char == '.' } }, label = { Text("Текущий баланс") }, suffix = { Text("₽") }, singleLine = true)
+            OutlinedTextField(name, { name = it }, label = { Text(tr("Название", "Name")) }, singleLine = true)
+            OutlinedTextField(balance, { balance = it.filter { char -> char.isDigit() || char == ',' || char == '.' } }, label = { Text(tr("Текущий баланс", "Current balance")) }, suffix = { Text("₽") }, singleLine = true)
         }
-    }, confirmButton = { TextButton({ parseMoneyCents(balance)?.let { if (name.isNotBlank()) onSave(name.trim(), it) } }) { Text("Сохранить") } }, dismissButton = { TextButton(onDismiss) { Text("Отмена") } })
+    }, confirmButton = { TextButton({ parseMoneyCents(balance)?.let { if (name.isNotBlank()) onSave(name.trim(), it) } }) { Text(tr("Сохранить", "Save")) } }, dismissButton = { TextButton(onDismiss) { Text(tr("Отмена", "Cancel")) } })
 }
 
-@Composable private fun ConfirmDelete(title: String, body: String, onDismiss: () -> Unit, confirmLabel: String = "Удалить", destructive: Boolean = true, onConfirm: () -> Unit) {
-    AlertDialog(onDismiss, title = { Text(title) }, text = { Text(body) }, confirmButton = { TextButton(onConfirm) { Text(confirmLabel, color = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary) } }, dismissButton = { TextButton(onDismiss) { Text("Отмена") } })
+@Composable private fun ConfirmDelete(title: String, body: String, onDismiss: () -> Unit, confirmLabel: String? = null, destructive: Boolean = true, onConfirm: () -> Unit) {
+    AlertDialog(onDismiss, title = { Text(title) }, text = { Text(body) }, confirmButton = { TextButton(onConfirm) { Text(confirmLabel ?: tr("Удалить", "Delete"), color = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary) } }, dismissButton = { TextButton(onDismiss) { Text(tr("Отмена", "Cancel")) } })
 }
 
 private fun formatLimitInput(cents: Long): String = when {

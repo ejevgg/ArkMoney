@@ -13,7 +13,7 @@ interface ExpenseDao {
     fun observeAll(): Flow<List<Expense>>
 
     @Insert
-    suspend fun insert(expense: Expense)
+    suspend fun insert(expense: Expense): Long
 
     @Update
     suspend fun updateExpense(expense: Expense)
@@ -32,6 +32,12 @@ interface ExpenseDao {
 
     @Query("SELECT COUNT(*) FROM expenses WHERE categoryId = :categoryId")
     suspend fun countExpensesForCategory(categoryId: Long): Int
+
+    @Query("SELECT * FROM expenses WHERE categoryId = :categoryId")
+    suspend fun expensesForCategory(categoryId: Long): List<Expense>
+
+    @Query("DELETE FROM expenses WHERE categoryId = :categoryId")
+    suspend fun deleteExpensesForCategory(categoryId: Long)
 
     @Insert
     suspend fun insertAll(expenses: List<Expense>)
@@ -75,6 +81,14 @@ interface ExpenseDao {
             .sortedWith(compareBy<Category> { it.sortOrder }.thenBy { it.id })
             .mapIndexed { index, item -> item.copy(sortOrder = index) }
         updateCategories(normalized)
+    }
+
+    @Transaction
+    suspend fun deleteCategoryAndExpenses(category: Category): List<String> {
+        val photoPaths = expensesForCategory(category.id).mapNotNull { it.photoPath.takeIf(String::isNotBlank) }
+        deleteExpensesForCategory(category.id)
+        check(deleteCategory(category.id) == 1) { "Category ${category.id} was not deleted" }
+        return photoPaths
     }
 
     @Query("SELECT * FROM accounts ORDER BY sortOrder, id")

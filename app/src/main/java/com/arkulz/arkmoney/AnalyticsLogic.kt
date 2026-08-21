@@ -1,9 +1,12 @@
 package com.arkulz.arkmoney
 
 import com.arkulz.arkmoney.data.Expense
+import com.arkulz.arkmoney.data.transactionType
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.temporal.TemporalAdjusters
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 enum class AnalyticsPeriod(val title: String) { WEEK("Неделя"), MONTH("Месяц"), QUARTER("3 месяца"), YEAR("Год"), CUSTOM("Период") }
 
@@ -12,6 +15,26 @@ data class DateRange(val start: LocalDate, val endInclusive: LocalDate) {
     val title: String get() = if (start.year == endInclusive.year && start.month == endInclusive.month) {
         "${start.dayOfMonth}–${endInclusive.dayOfMonth} ${start.month.russianName()}"
     } else "${start.dayOfMonth} ${start.month.russianShort()} — ${endInclusive.dayOfMonth} ${endInclusive.month.russianShort()}"
+
+    fun localizedTitle(locale: Locale): String = if (start.year == endInclusive.year && start.month == endInclusive.month) {
+        "${start.dayOfMonth}–${endInclusive.dayOfMonth} ${start.format(DateTimeFormatter.ofPattern("MMMM", locale))}"
+    } else "${start.format(DateTimeFormatter.ofPattern("d MMM", locale))} — ${endInclusive.format(DateTimeFormatter.ofPattern("d MMM", locale))}"
+}
+
+data class AnalyticsSummary(val expenses: Long, val income: Long, val net: Long, val previousExpenses: Long, val expenseChangePercent: Int?, val projectedExpenses: Long?)
+
+fun analyticsSummary(items: List<Expense>, range: DateRange, today: LocalDate = LocalDate.now()): AnalyticsSummary {
+    val selected = items.inRange(range)
+    val expenses = selected.filter { it.transactionType == com.arkulz.arkmoney.data.TransactionType.EXPENSE }.sumOf { it.amountCents }
+    val income = selected.filter { it.transactionType == com.arkulz.arkmoney.data.TransactionType.INCOME }.sumOf { it.amountCents }
+    val days = java.time.temporal.ChronoUnit.DAYS.between(range.start, range.endInclusive) + 1
+    val previous = DateRange(range.start.minusDays(days), range.start.minusDays(1))
+    val previousExpenses = items.inRange(previous).filter { it.transactionType == com.arkulz.arkmoney.data.TransactionType.EXPENSE }.sumOf { it.amountCents }
+    val change = if (previousExpenses > 0) (((expenses - previousExpenses) * 100.0) / previousExpenses).toInt() else null
+    val projected = if (range.start == today.withDayOfMonth(1) && range.endInclusive == today.withDayOfMonth(today.lengthOfMonth())) {
+        expenses * today.lengthOfMonth() / today.dayOfMonth.coerceAtLeast(1)
+    } else null
+    return AnalyticsSummary(expenses, income, income - expenses, previousExpenses, change, projected)
 }
 
 fun AnalyticsPeriod.range(anchor: LocalDate): DateRange = when (this) {

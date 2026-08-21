@@ -75,35 +75,52 @@ fun AnalyticsScreen(modifier: Modifier, expenses: List<Expense>, categories: Lis
     val today = LocalDate.now()
     val lastSevenDays = (6 downTo 0).map { today.minusDays(it.toLong()) }
     val lastSevenValues = expenses.filter { it.transactionType == TransactionType.EXPENSE }.dailyTotals(lastSevenDays)
+    val summary = analyticsSummary(expenses, range, today)
+    val language = LocalAppLanguage.current
 
     LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item {
-            Text("Аналитика", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+            Text(tr("Аналитика", "Analytics"), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                 IconButton({ if (period != AnalyticsPeriod.CUSTOM) anchorEpoch = period.shift(anchor, -1).toEpochDay() }) { Text("‹", style = MaterialTheme.typography.headlineMedium) }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(range.title, fontWeight = FontWeight.SemiBold)
-                    if (period == AnalyticsPeriod.MONTH && range.start.month == today.month && range.start.year == today.year) Text("Текущий месяц", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(range.localizedTitle(language.locale()), fontWeight = FontWeight.SemiBold)
+                    if (period == AnalyticsPeriod.MONTH && range.start.month == today.month && range.start.year == today.year) Text(tr("Текущий месяц", "Current month"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 IconButton({ if (period != AnalyticsPeriod.CUSTOM) anchorEpoch = period.shift(anchor, 1).toEpochDay() }) { Text("›", style = MaterialTheme.typography.headlineMedium) }
             }
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                AnalyticsPeriod.entries.forEach { item -> PeriodChip(item.title, item == period) { period = item; anchorEpoch = LocalDate.now().toEpochDay(); if (item == AnalyticsPeriod.CUSTOM) showRangePicker = true } }
+                AnalyticsPeriod.entries.forEach { item ->
+                    val label = when (item) { AnalyticsPeriod.WEEK -> tr("Неделя", "Week"); AnalyticsPeriod.MONTH -> tr("Месяц", "Month"); AnalyticsPeriod.QUARTER -> tr("3 месяца", "3 months"); AnalyticsPeriod.YEAR -> tr("Год", "Year"); AnalyticsPeriod.CUSTOM -> tr("Период", "Range") }
+                    PeriodChip(label, item == period) { period = item; anchorEpoch = LocalDate.now().toEpochDay(); if (item == AnalyticsPeriod.CUSTOM) showRangePicker = true }
+                }
             }
         }
-        item { CategoryAnalyticsCard("Доходы за период", incomeTotal, incomeByCategory.map { it.key to it.value }, categories) }
+        item {
+            Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(tr("Финансовая сводка", "Financial summary"), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    MetricCard(tr("Доходы", "Income"), formatMoney(summary.income), Modifier.weight(1f))
+                    MetricCard(tr("Расходы", "Expenses"), formatMoney(summary.expenses), Modifier.weight(1f))
+                }
+                MetricCard(tr("Результат", "Net"), (if (summary.net >= 0) "+" else "") + formatMoney(summary.net), Modifier.fillMaxWidth())
+                summary.expenseChangePercent?.let { Text(if (it >= 0) tr("Расходы выше предыдущего периода на ${kotlin.math.abs(it)}%", "Expenses are ${kotlin.math.abs(it)}% higher than the previous period") else tr("Расходы ниже предыдущего периода на ${kotlin.math.abs(it)}%", "Expenses are ${kotlin.math.abs(it)}% lower than the previous period"), color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                summary.projectedExpenses?.let { Text(tr("Прогноз до конца месяца: ${formatMoney(it)}", "Projected month total: ${formatMoney(it)}"), color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            } }
+        }
+        item { CategoryAnalyticsCard(tr("Доходы за период", "Income for period"), incomeTotal, incomeByCategory.map { it.key to it.value }, categories) }
         item {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(18.dp)) {
-                    Text("Расходы за период", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(tr("Расходы за период", "Expenses for period"), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(formatMoney(total), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
                     DonutChart(byCategory.map { it.value }, total, Modifier.fillMaxWidth().height(180.dp))
-                    if (byCategory.isEmpty()) Text("Нет расходов за выбранный период", Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (byCategory.isEmpty()) Text(tr("Нет расходов за выбранный период", "No expenses for this period"), Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     byCategory.take(6).forEachIndexed { index, entry ->
                         val category = categories.firstOrNull { it.id == entry.key }
                         Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
                             Box(Modifier.size(10.dp).background(chartColors[index % chartColors.size], CircleShape))
-                            Text(category?.name ?: "Другое", Modifier.padding(start = 9.dp).weight(1f))
+                            Text(category?.name ?: tr("Другое", "Other"), Modifier.padding(start = 9.dp).weight(1f))
                             Text(formatMoney(entry.value), fontWeight = FontWeight.Medium)
                         }
                     }
@@ -113,13 +130,13 @@ fun AnalyticsScreen(modifier: Modifier, expenses: List<Expense>, categories: Lis
         item {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(18.dp)) {
-                    Text("Последние 7 дней", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    Text("Всего ${formatMoney(lastSevenValues.sum())}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(tr("Последние 7 дней", "Last 7 days"), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text(tr("Всего ${formatMoney(lastSevenValues.sum())}", "Total ${formatMoney(lastSevenValues.sum())}"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     WeeklyBars(lastSevenValues, Modifier.fillMaxWidth().height(150.dp).padding(top = 16.dp))
                     Row(Modifier.fillMaxWidth()) {
                         lastSevenDays.forEachIndexed { index, date ->
                             Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(date.format(DateTimeFormatter.ofPattern("EE", Locale.forLanguageTag("ru"))).take(2), style = MaterialTheme.typography.labelSmall)
+                                Text(date.format(DateTimeFormatter.ofPattern("EE", language.locale())).take(2), style = MaterialTheme.typography.labelSmall)
                                 Text(date.dayOfMonth.toString(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Text(compactMoney(lastSevenValues[index]), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                             }
@@ -131,8 +148,8 @@ fun AnalyticsScreen(modifier: Modifier, expenses: List<Expense>, categories: Lis
         item {
             val days = java.time.temporal.ChronoUnit.DAYS.between(range.start, range.endInclusive).toInt() + 1
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                MetricCard("В среднем в день", formatMoney(if (days > 0) total / days else 0), Modifier.weight(1f))
-                MetricCard("Операций", selected.size.toString(), Modifier.weight(1f))
+                MetricCard(tr("В среднем в день", "Daily average"), formatMoney(if (days > 0) total / days else 0), Modifier.weight(1f))
+                MetricCard(tr("Операций", "Operations"), selected.size.toString(), Modifier.weight(1f))
             }
         }
     }
@@ -145,7 +162,7 @@ fun AnalyticsScreen(modifier: Modifier, expenses: List<Expense>, categories: Lis
             val start = state.selectedStartDateMillis?.let { Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate() }
             val end = state.selectedEndDateMillis?.let { Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate() }
             if (start != null && end != null) { customStart = start.toEpochDay(); customEnd = end.toEpochDay(); period = AnalyticsPeriod.CUSTOM; showRangePicker = false }
-        }) { Text("Выбрать") } }, dismissButton = { TextButton({ showRangePicker = false }) { Text("Отмена") } }) { DateRangePicker(state, title = { Text("Произвольный период", Modifier.padding(16.dp)) }) }
+        }) { Text(tr("Выбрать", "Select")) } }, dismissButton = { TextButton({ showRangePicker = false }) { Text(tr("Отмена", "Cancel")) } }) { DateRangePicker(state, title = { Text(tr("Произвольный период", "Custom range"), Modifier.padding(16.dp)) }) }
     }
 }
 
@@ -154,8 +171,8 @@ fun AnalyticsScreen(modifier: Modifier, expenses: List<Expense>, categories: Lis
         Text(title, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(formatMoney(total), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
         DonutChart(entries.map { it.second }, total, Modifier.fillMaxWidth().height(150.dp))
-        if (entries.isEmpty()) Text("Нет операций за выбранный период", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        entries.take(6).forEachIndexed { index, entry -> Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) { Box(Modifier.size(10.dp).background(chartColors[index % chartColors.size], CircleShape)); Text(categories.firstOrNull { it.id == entry.first }?.name ?: "Другое", Modifier.padding(start = 9.dp).weight(1f)); Text(formatMoney(entry.second), fontWeight = FontWeight.Medium) } }
+        if (entries.isEmpty()) Text(tr("Нет операций за выбранный период", "No operations for this period"), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        entries.take(6).forEachIndexed { index, entry -> Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) { Box(Modifier.size(10.dp).background(chartColors[index % chartColors.size], CircleShape)); Text(categories.firstOrNull { it.id == entry.first }?.name ?: tr("Другое", "Other"), Modifier.padding(start = 9.dp).weight(1f)); Text(formatMoney(entry.second), fontWeight = FontWeight.Medium) } }
     } }
 }
 

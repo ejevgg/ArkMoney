@@ -59,4 +59,22 @@ class ArkMoneyBackupTest {
         } }.toByteArray()
         assertThrows(IllegalArgumentException::class.java) { ArkMoneyBackup.read(ByteArrayInputStream(bytes)) }
     }
+
+    @Test fun `rejects path traversal archive entries`() {
+        fun archive(names: List<String>) = ByteArrayOutputStream().also { output -> ZipOutputStream(output).use { zip -> names.forEach { name -> zip.putNextEntry(ZipEntry(name)); zip.write("x".toByteArray()); zip.closeEntry() } } }.toByteArray()
+        assertThrows(IllegalArgumentException::class.java) { ArkMoneyBackup.read(ByteArrayInputStream(archive(listOf("../manifest.txt")))) }
+    }
+
+    @Test fun `rejects unsupported version and unreferenced files`() {
+        fun archive(extra: Boolean) = ByteArrayOutputStream().also { output -> ZipOutputStream(output).use { zip ->
+            fun add(name: String, value: String) { zip.putNextEntry(ZipEntry(name)); zip.write(value.toByteArray()); zip.closeEntry() }
+            add("manifest.txt", "ArkMoneyBackup\nversion=${if (extra) 1 else 99}\n")
+            add("accounts.tsv", "1\tQQ==\t0\t0\tfalse")
+            add("categories.tsv", "1\tRA==\t4oCi4oCi4oCi\t0\tEXPENSE")
+            add("operations.tsv", "")
+            if (extra) add("unexpected.bin", "x")
+        } }.toByteArray()
+        assertThrows(IllegalArgumentException::class.java) { ArkMoneyBackup.read(ByteArrayInputStream(archive(false))) }
+        assertThrows(IllegalArgumentException::class.java) { ArkMoneyBackup.read(ByteArrayInputStream(archive(true))) }
+    }
 }

@@ -17,6 +17,9 @@
 - Enter records the operation today; a long press can record it today, yesterday
   or the day before yesterday. Live preview makes a separate Equals key unnecessary.
 - A separate name action reveals a focused text field and the system keyboard.
+- Android Back closes the built-in calculator first. Scrolling the history down
+  hides it; tapping its compact control or swiping upward opens it again.
+- A saved operation is brought into view and can be undone from a short Snackbar.
 - Expenses are grouped by local calendar day.
 - A custom expense name replaces the category name in the list.
 - Tapping an expense opens its card with name, description and photo controls.
@@ -36,6 +39,8 @@
 - Accounts can be created, edited and deleted through Settings.
 - Categories can be created, renamed, assigned an emoji and deleted through
   Settings.
+- Category deletion offers either reassignment or explicit removal of all linked
+  operations and their photos.
 - Expense and income categories have independent drag ordering. A long drag on a
   calculator category changes that same order.
 - Category icons come from a large built-in, grouped emoji library.
@@ -47,10 +52,14 @@
 - Week, month, quarter and year periods can be navigated backward and forward.
 - Analytics show category totals and daily spending, including zero-value days
   where needed for a continuous chart.
+- Summary cards show income, expenses, net result, previous-period change and a
+  current-month projection.
 
 ## Settings and data transfer
 
 - Theme choices apply immediately and persist: device, light or dark.
+- Russian, English and device-language modes apply immediately and persist.
+- Category emoji can be hidden from the calculator without changing categories.
 - The application version is centered below the GitHub repository action.
 - Excel export contains the selected ArkMoney accounts, categories and operations.
 - Excel import is temporarily unavailable while its interaction and validation flow is redesigned.
