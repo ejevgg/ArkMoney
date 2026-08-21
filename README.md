@@ -3,7 +3,7 @@
 ArkMoney is a private, local-first expense tracker for Android, built with
 Material 3.
 
-> Current release: **0.3.0**. Published APKs are available through GitHub
+> Current release: **0.4.0**. Published APKs are available through GitHub
 > Releases.
 
 ## Download
@@ -25,6 +25,8 @@ open the APK.
 - Excel export with account and category selection;
 - validated `.arkmoney` backup and restore, including private photos;
 - category drag-and-drop, a grouped emoji library and an optional daily limit;
+- Russian and English interfaces, optional calculator emoji and haptic feedback;
+- native calculator gestures, automatic history positioning and quick undo;
 - system, light and dark themes;
 - Material 3 interface and Android 12 themed icon support.
 
@@ -68,7 +70,7 @@ compatible updates.
 
 ## Project status
 
-ArkMoney 0.3.0 is the current stable local-first release. Excel import is
+ArkMoney 0.4.0 is the current stable local-first release. Excel import is
 temporarily unavailable while its interaction and validation flow is redesigned.
 See [CHANGELOG.md](CHANGELOG.md)
 for release notes.
@@ -85,7 +87,7 @@ for release notes.
 ArkMoney — локальное Android-приложение для приватного учёта расходов, доходов
 и переводов между счетами.
 
-> Текущая стабильная версия: **0.3.0**.
+> Текущая стабильная версия: **0.4.0**.
 
 ### Возможности
 
@@ -97,6 +99,8 @@ ArkMoney — локальное Android-приложение для приват
 - экспорт Excel с выбором счетов и категорий;
 - резервные копии `.arkmoney` со счетами, категориями, операциями и фотографиями;
 - сортировка категорий перетаскиванием, библиотека эмодзи и дневной лимит;
+- русский и английский интерфейсы, настройка эмодзи и виброотдачи;
+- жесты калькулятора, прокрутка к новой записи и быстрая отмена;
 - светлая, тёмная и системная темы Material 3.
 
 Импорт Excel временно недоступен до переработки интерфейса и проверки данных.

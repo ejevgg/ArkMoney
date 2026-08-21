@@ -9,6 +9,7 @@ import android.view.ScaleGestureDetector
 import android.widget.ImageView
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.FileProvider
 import androidx.compose.animation.AnimatedVisibility
@@ -19,6 +20,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -31,6 +33,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
@@ -57,8 +60,12 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TimePicker
@@ -77,6 +84,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -88,6 +96,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -123,15 +132,23 @@ fun ExpensesScreen(
     accounts: List<Account>,
     selectedAccount: Account?,
     onAccountSelected: (Account) -> Unit,
-    onAddExpense: (Long, Category?, String, Long, TransactionType, Long?) -> Unit,
+    onAddExpense: (Long, Category?, String, Long, TransactionType, Long?, (Long) -> Unit) -> Unit,
+    onUndoExpense: (Long) -> Unit,
     onUpdateExpense: (Expense) -> Unit,
     onDeleteExpense: (Expense) -> Unit,
     onMoveCategory: (Category, Int) -> Unit,
     hapticsEnabled: Boolean,
+    showCategoryEmoji: Boolean,
     dailyLimitCents: Long?,
 ) {
     val context = LocalContext.current
+    val operationAddedText = tr("Операция добавлена", "Operation added")
+    val undoText = tr("Отменить", "Undo")
+    val photoAddError = tr("Не удалось добавить фотографию", "Could not add photo")
+    val photoProcessError = tr("Не удалось обработать фотографию", "Could not process photo")
     val scope = rememberCoroutineScope()
+    val historyState = rememberLazyListState()
+    val snackbarHostState = remember { SnackbarHostState() }
     var calculator by remember { mutableStateOf(CalculatorState()) }
     var calculatorVisible by rememberSaveable { mutableStateOf(true) }
     val calculatorVisibility = remember { MutableTransitionState(true) }
@@ -150,6 +167,7 @@ fun ExpensesScreen(
     var displayedCategories by remember { mutableStateOf(categories) }
     LaunchedEffect(categories) { displayedCategories = categories }
     LaunchedEffect(calculatorVisible) { calculatorVisibility.targetState = calculatorVisible }
+    BackHandler(calculatorVisible) { calculatorVisible = false }
     val visibleCategories = displayedCategories.filter { it.type == transactionType.name }
     val selectedCategory = visibleCategories.firstOrNull { it.id == selectedCategoryId }
         ?: visibleCategories.firstOrNull().also { selectedCategoryId = it?.id }
@@ -165,7 +183,7 @@ fun ExpensesScreen(
                     onUpdateExpense(updated)
                     selectedExpense = updated
                 }
-                .onFailure { android.widget.Toast.makeText(context, "Не удалось добавить фотографию", android.widget.Toast.LENGTH_SHORT).show() }
+                .onFailure { android.widget.Toast.makeText(context, photoAddError, android.widget.Toast.LENGTH_SHORT).show() }
         }
     }
     val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { saved ->
@@ -178,7 +196,7 @@ fun ExpensesScreen(
                     if (expense.photoPath.isNotBlank() && expense.photoPath != file.absolutePath) runCatching { File(expense.photoPath).delete() }
                     val updated = expense.copy(photoPath = file.absolutePath); onUpdateExpense(updated); selectedExpense = updated
                 }
-                .onFailure { file.delete(); Toast.makeText(context, "Не удалось обработать фотографию", Toast.LENGTH_SHORT).show() }
+                .onFailure { file.delete(); Toast.makeText(context, photoProcessError, Toast.LENGTH_SHORT).show() }
         } else file?.delete()
     }
 
@@ -190,19 +208,26 @@ fun ExpensesScreen(
         if (transactionType == TransactionType.TRANSFER && (destination == null || destination == selectedAccount?.id)) return
         val date = LocalDate.now().minusDays(daysAgo.toLong())
         val timestamp = date.atTime(LocalTime.now()).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-        onAddExpense(cents, category, quickTitle.trim(), timestamp, transactionType, destination)
+        onAddExpense(cents, category, quickTitle.trim(), timestamp, transactionType, destination) { createdId ->
+            scope.launch {
+                historyState.animateScrollToItem(0)
+                val result = snackbarHostState.showSnackbar(operationAddedText, undoText, withDismissAction = true)
+                if (result == SnackbarResult.ActionPerformed) onUndoExpense(createdId)
+            }
+        }
         if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
         calculator = CalculatorState()
         quickTitle = ""
         titleEditorVisible = false
     }
 
-    Column(modifier.fillMaxSize()) {
+    Box(modifier.fillMaxSize()) {
+      Column(Modifier.fillMaxSize()) {
         BalanceHeader(selectedAccount, accounts, expenses, onAccountSelected, searchQuery, { searchQuery = it }, searchVisible) {
             searchVisible = it
             if (!it) searchQuery = ""
         }
-        ExpenseHistory(accountExpenses, categories, Modifier.weight(1f), searchVisible, dailyLimitCents, onExpenseClick = { selectedExpense = it })
+        ExpenseHistory(accountExpenses, categories, Modifier.weight(1f), historyState, searchVisible, dailyLimitCents, onUserScroll = { calculatorVisible = false }, onExpenseClick = { selectedExpense = it })
         AnimatedVisibility(visibleState = calculatorVisibility) {
             EntryPanel(
                 calculator = calculator,
@@ -226,6 +251,7 @@ fun ExpensesScreen(
                     onMoveCategory(category, direction)
                 },
                 hapticsEnabled = hapticsEnabled,
+                showCategoryEmoji = showCategoryEmoji,
                 onDigit = { calculator = calculator.pressDigit(it) },
                 onDecimal = { calculator = calculator.pressDecimal() },
                 onOperation = { calculator = calculator.pressOperation(it) },
@@ -237,25 +263,30 @@ fun ExpensesScreen(
             )
         }
         if (calculatorVisibility.isIdle && !calculatorVisibility.currentState && !calculatorVisibility.targetState) {
-            Surface(Modifier.fillMaxWidth().clickable { calculatorVisible = true }, color = MaterialTheme.colorScheme.surfaceContainer, tonalElevation = 3.dp) {
+            Surface(Modifier.fillMaxWidth().pointerInput(Unit) {
+                var drag = 0f
+                detectVerticalDragGestures(onVerticalDrag = { change, amount -> change.consume(); drag += amount }, onDragEnd = { if (drag < -24f) calculatorVisible = true })
+            }.clickable { calculatorVisible = true }, color = MaterialTheme.colorScheme.surfaceContainer, tonalElevation = 3.dp) {
                 Row(Modifier.padding(horizontal = 20.dp, vertical = 10.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.KeyboardArrowUp, null)
-                    Text("Открыть калькулятор", Modifier.padding(start = 6.dp), fontWeight = FontWeight.Medium)
+                    Text(tr("Открыть калькулятор", "Open calculator"), Modifier.padding(start = 6.dp), fontWeight = FontWeight.Medium)
                 }
             }
         }
+      }
+      SnackbarHost(snackbarHostState, Modifier.align(Alignment.BottomCenter).padding(bottom = if (calculatorVisible) 12.dp else 52.dp))
     }
     if (chooseExpenseDay) {
         AlertDialog(
             onDismissRequest = { chooseExpenseDay = false },
-            title = { Text("Когда была операция?") },
+            title = { Text(tr("Когда была операция?", "When was the operation?")) },
             text = { Column {
-                listOf(0 to "Сегодня", 1 to "Вчера", 2 to "Позавчера").forEach { (days, title) ->
+                listOf(0 to tr("Сегодня", "Today"), 1 to tr("Вчера", "Yesterday"), 2 to tr("Позавчера", "Two days ago")).forEach { (days, title) ->
                     Text(title, Modifier.fillMaxWidth().clickable { chooseExpenseDay = false; save(days) }.padding(vertical = 14.dp), fontWeight = FontWeight.Medium)
                 }
             } },
             confirmButton = {},
-            dismissButton = { TextButton({ chooseExpenseDay = false }) { Text("Отмена") } },
+            dismissButton = { TextButton({ chooseExpenseDay = false }) { Text(tr("Отмена", "Cancel")) } },
         )
     }
     selectedExpense?.let { expense ->
@@ -281,6 +312,7 @@ fun ExpensesScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun BalanceHeader(
     account: Account?,
@@ -305,14 +337,11 @@ private fun BalanceHeader(
             Text("ArkMoney", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.align(Alignment.CenterStart))
             Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(formatMoney(balance), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                Box {
-                    val accountShape = RoundedCornerShape(14.dp)
-                    Text(account?.name ?: "Счёт", Modifier.clip(accountShape).background(MaterialTheme.colorScheme.secondaryContainer).clickable { menuOpen = true }.padding(horizontal = 10.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Medium)
-                    DropdownMenu(menuOpen, { menuOpen = false }) { accounts.forEach { item -> DropdownMenuItem({ Column { Text(item.name); Text(formatMoney(item.currentBalance(expenses)), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } }, onClick = { onSelect(item); menuOpen = false }) } }
-                }
+                val accountShape = RoundedCornerShape(14.dp)
+                Text("${account?.name ?: tr("Счёт", "Account")}  ▾", Modifier.clip(accountShape).background(MaterialTheme.colorScheme.secondaryContainer).clickable { menuOpen = true }.padding(horizontal = 10.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Medium)
             }
             IconButton({ if (searchVisible) keyboard?.hide(); onSearchVisibleChange(!searchVisible) }, Modifier.align(Alignment.CenterEnd)) {
-                Icon(if (searchVisible) Icons.Default.Close else Icons.Default.Search, if (searchVisible) "Закрыть поиск" else "Поиск")
+                Icon(if (searchVisible) Icons.Default.Close else Icons.Default.Search, if (searchVisible) tr("Закрыть поиск", "Close search") else tr("Поиск", "Search"))
             }
         }
         AnimatedVisibility(searchVisible) {
@@ -320,27 +349,57 @@ private fun BalanceHeader(
                 value = searchQuery,
                 onValueChange = onSearchQueryChange,
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp).focusRequester(searchFocusRequester),
-                placeholder = { Text("Название или сумма") },
+                placeholder = { Text(tr("Название или сумма", "Name or amount")) },
                 singleLine = true,
                 shape = RoundedCornerShape(18.dp),
             )
+        }
+    }
+    if (menuOpen) ModalBottomSheet(onDismissRequest = { menuOpen = false }) {
+        Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 28.dp)) {
+            Text(tr("Счета", "Accounts"), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 12.dp))
+            accounts.forEach { item ->
+                val selected = item.id == account?.id
+                Surface(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(18.dp)).clickable { onSelect(item); menuOpen = false },
+                    shape = RoundedCornerShape(18.dp),
+                    color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
+                ) {
+                    Row(Modifier.padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(12.dp).background(if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline, CircleShape))
+                        Text(item.name, Modifier.padding(start = 12.dp).weight(1f), fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
+                        Text(formatMoney(item.currentBalance(expenses)), fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+            HorizontalDivider(Modifier.padding(vertical = 10.dp))
+            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(tr("Всего на счетах", "Total across accounts"), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(formatMoney(accounts.sumOf { it.currentBalance(expenses) }), fontWeight = FontWeight.Bold)
+            }
         }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ExpenseHistory(expenses: List<Expense>, categories: List<Category>, modifier: Modifier, showDateAction: Boolean, dailyLimitCents: Long?, onExpenseClick: (Expense) -> Unit) {
+private fun ExpenseHistory(expenses: List<Expense>, categories: List<Category>, modifier: Modifier, listState: androidx.compose.foundation.lazy.LazyListState, showDateAction: Boolean, dailyLimitCents: Long?, onUserScroll: () -> Unit, onExpenseClick: (Expense) -> Unit) {
     val groups = expenses.groupBy { it.localDate() }.entries.toList()
-    val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     var showPicker by remember { mutableStateOf(false) }
     Column(modifier.fillMaxWidth()) {
-        if (showDateAction) TextButton({ showPicker = true }, Modifier.align(Alignment.End).padding(horizontal = 8.dp)) { Text("Перейти к дате") }
+        if (showDateAction) TextButton({ showPicker = true }, Modifier.align(Alignment.End).padding(horizontal = 8.dp)) { Text(tr("Перейти к дате", "Go to date")) }
         if (expenses.isEmpty()) Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) { Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("Пока нет операций", style = MaterialTheme.typography.titleMedium)
-            Text("Выберите тип и введите сумму", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        } } else LazyColumn(Modifier.fillMaxWidth().weight(1f), state = listState) {
+            Text(tr("Пока нет операций", "No operations yet"), style = MaterialTheme.typography.titleMedium)
+            Text(tr("Выберите тип и введите сумму", "Choose a type and enter an amount"), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        } } else LazyColumn(Modifier.fillMaxWidth().weight(1f).pointerInput(Unit) {
+            awaitPointerEventScope {
+                while (true) {
+                    val event = awaitPointerEvent()
+                    if (event.changes.any { it.pressed && it.positionChange().y != 0f }) onUserScroll()
+                }
+            }
+        }, state = listState) {
             groups.forEach { (date, dayExpenses) ->
                 item(key = "day-$date") { DayHeader(date, dayExpenses.filter { it.transactionType == TransactionType.EXPENSE }.sumOf { it.amountCents }, dailyLimitCents) }
                 items(dayExpenses.size, key = { dayExpenses[it].id }) { index ->
@@ -358,13 +417,14 @@ private fun ExpenseHistory(expenses: List<Expense>, categories: List<Category>, 
             val index = groups.indexOfFirst { selected != null && !it.key.isAfter(selected) }
             if (index >= 0) scope.launch { listState.animateScrollToItem(groups.take(index).sumOf { 1 + it.value.size }) }
             showPicker = false
-        }) { Text("Перейти") } }, dismissButton = { TextButton({ showPicker = false }) { Text("Отмена") } }) { DatePicker(picker) }
+        }) { Text(tr("Перейти", "Go")) } }, dismissButton = { TextButton({ showPicker = false }) { Text(tr("Отмена", "Cancel")) } }) { DatePicker(picker) }
     }
 }
 
 @Composable private fun DayHeader(date: LocalDate, total: Long, dailyLimitCents: Long?) {
     val today = LocalDate.now()
-    val title = when (date) { today -> "Сегодня"; today.minusDays(1) -> "Вчера"; else -> date.format(DateTimeFormatter.ofPattern("d MMMM", Locale.forLanguageTag("ru"))) }
+    val language = LocalAppLanguage.current
+    val title = when (date) { today -> tr("Сегодня", "Today"); today.minusDays(1) -> tr("Вчера", "Yesterday"); else -> date.format(DateTimeFormatter.ofPattern("d MMMM", language.locale())) }
     Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainerLow).padding(horizontal = 20.dp, vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
         Text(title, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(if (date == today && dailyLimitCents != null && dailyLimitCents > 0) "${formatMoney(total)} / ${formatMoney(dailyLimitCents)}" else formatMoney(total), color = if (date == today && dailyLimitCents != null && total > dailyLimitCents) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
@@ -375,7 +435,7 @@ private fun ExpenseHistory(expenses: List<Expense>, categories: List<Category>, 
     Row(Modifier.fillMaxWidth().clickable { onClick(expense) }.padding(horizontal = 20.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(38.dp).background(MaterialTheme.colorScheme.secondaryContainer, CircleShape), contentAlignment = Alignment.Center) { Text(category?.emoji ?: "•••", fontSize = 17.sp) }
         Column(Modifier.padding(start = 12.dp).weight(1f)) {
-            Text(expense.title.ifBlank { if (expense.transactionType == TransactionType.TRANSFER) "Перевод" else category?.name ?: expense.category })
+            Text(expense.title.ifBlank { if (expense.transactionType == TransactionType.TRANSFER) tr("Перевод", "Transfer") else category?.name ?: expense.category })
             Text(Instant.ofEpochMilli(expense.createdAt).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("HH:mm")), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (expense.comment.isNotBlank()) Text(expense.comment, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
         }
@@ -404,6 +464,9 @@ private fun ExpenseDetailDialog(
     var editTime by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var showPhoto by remember { mutableStateOf(false) }
+    val language = LocalAppLanguage.current
+    val photoSavedText = tr("Фотография сохранена", "Photo saved")
+    val photoSaveErrorText = tr("Не удалось сохранить фотографию", "Could not save photo")
     val currentDateTime = Instant.ofEpochMilli(createdAt).atZone(ZoneId.systemDefault())
     val parsedAmount = parseMoneyCents(amount)
     Dialog(onDismissRequest = onDismiss) {
@@ -411,21 +474,21 @@ private fun ExpenseDetailDialog(
             Column(Modifier.fillMaxWidth().heightIn(max = 720.dp).verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text(title.ifBlank { if (expense.transactionType == TransactionType.TRANSFER) "Перевод" else category?.name ?: expense.category }, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
-                        Text(category?.let { "${it.emoji}  ${it.name}" } ?: "Перевод между счетами", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(title.ifBlank { if (expense.transactionType == TransactionType.TRANSFER) tr("Перевод", "Transfer") else category?.name ?: expense.category }, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+                        Text(category?.let { "${it.emoji}  ${it.name}" } ?: tr("Перевод между счетами", "Transfer between accounts"), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    IconButton({ confirmDelete = true }) { Icon(Icons.Default.Delete, "Удалить операцию", tint = MaterialTheme.colorScheme.error) }
+                    IconButton({ confirmDelete = true }) { Icon(Icons.Default.Delete, tr("Удалить операцию", "Delete operation"), tint = MaterialTheme.colorScheme.error) }
                 }
-                OutlinedTextField(amount, { value -> amount = value.filter { it.isDigit() || it == ',' || it == '.' } }, Modifier.fillMaxWidth(), label = { Text("Сумма") }, suffix = { Text("₽") }, singleLine = true, isError = parsedAmount == null || parsedAmount <= 0)
-                OutlinedTextField(title, { title = it }, Modifier.fillMaxWidth(), label = { Text("Название операции") }, placeholder = { Text(if (expense.transactionType == TransactionType.TRANSFER) "Перевод" else category?.name ?: expense.category) }, singleLine = true)
-                OutlinedTextField(description, { description = it }, Modifier.fillMaxWidth(), label = { Text("Описание") }, minLines = 1, maxLines = 3)
+                OutlinedTextField(amount, { value -> amount = value.filter { it.isDigit() || it == ',' || it == '.' } }, Modifier.fillMaxWidth(), label = { Text(tr("Сумма", "Amount")) }, suffix = { Text("₽") }, singleLine = true, isError = parsedAmount == null || parsedAmount <= 0)
+                OutlinedTextField(title, { title = it }, Modifier.fillMaxWidth(), label = { Text(tr("Название операции", "Operation name")) }, placeholder = { Text(if (expense.transactionType == TransactionType.TRANSFER) tr("Перевод", "Transfer") else category?.name ?: expense.category) }, singleLine = true)
+                OutlinedTextField(description, { description = it }, Modifier.fillMaxWidth(), label = { Text(tr("Описание", "Description")) }, minLines = 1, maxLines = 3)
                 Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
-                        TextButton({ editDate = true }, Modifier.weight(1f)) { Text(currentDateTime.format(DateTimeFormatter.ofPattern("d MMM yyyy", Locale.forLanguageTag("ru")))) }
+                        TextButton({ editDate = true }, Modifier.weight(1f)) { Text(currentDateTime.format(DateTimeFormatter.ofPattern("d MMM yyyy", language.locale()))) }
                         TextButton({ editTime = true }, Modifier.weight(1f)) { Text(currentDateTime.format(DateTimeFormatter.ofPattern("HH:mm"))) }
                     }
                 }
-                Text("Фотография", style = MaterialTheme.typography.titleSmall)
+                Text(tr("Фотография", "Photo"), style = MaterialTheme.typography.titleSmall)
                 if (expense.photoPath.isNotBlank()) {
                     AndroidView(
                         factory = { ImageView(it).apply { scaleType = ImageView.ScaleType.CENTER_CROP } },
@@ -434,13 +497,13 @@ private fun ExpenseDetailDialog(
                     )
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    FilledTonalButton(onTakePhoto, Modifier.weight(1f)) { Text("Камера") }
-                    FilledTonalButton(onPickPhoto, Modifier.weight(1f)) { Text("Галерея") }
-                    if (expense.photoPath.isNotBlank()) IconButton(onRemovePhoto) { Icon(Icons.Default.Delete, "Удалить фотографию", tint = MaterialTheme.colorScheme.error) }
+                    FilledTonalButton(onTakePhoto, Modifier.weight(1f)) { Text(tr("Камера", "Camera")) }
+                    FilledTonalButton(onPickPhoto, Modifier.weight(1f)) { Text(tr("Галерея", "Gallery")) }
+                    if (expense.photoPath.isNotBlank()) IconButton(onRemovePhoto) { Icon(Icons.Default.Delete, tr("Удалить фотографию", "Remove photo"), tint = MaterialTheme.colorScheme.error) }
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onDismiss) { Text("Отмена") }
-                    Button({ parsedAmount?.let { onSave(expense.copy(amountCents = it, title = title.trim(), comment = description.trim(), createdAt = createdAt)) } }, enabled = parsedAmount != null && parsedAmount > 0) { Text("Сохранить") }
+                    TextButton(onDismiss) { Text(tr("Отмена", "Cancel")) }
+                    Button({ parsedAmount?.let { onSave(expense.copy(amountCents = it, title = title.trim(), comment = description.trim(), createdAt = createdAt)) } }, enabled = parsedAmount != null && parsedAmount > 0) { Text(tr("Сохранить", "Save")) }
                 }
             }
         }
@@ -450,13 +513,13 @@ private fun ExpenseDetailDialog(
         DatePickerDialog({ editDate = false }, confirmButton = { TextButton({
             picker.selectedDateMillis?.let { millis -> val date = Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate(); createdAt = date.atTime(currentDateTime.toLocalTime()).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli() }
             editDate = false
-        }) { Text("Готово") } }, dismissButton = { TextButton({ editDate = false }) { Text("Отмена") } }) { DatePicker(picker) }
+        }) { Text(tr("Готово", "Done")) } }, dismissButton = { TextButton({ editDate = false }) { Text(tr("Отмена", "Cancel")) } }) { DatePicker(picker) }
     }
     if (editTime) {
         val picker = rememberTimePickerState(currentDateTime.hour, currentDateTime.minute, true)
-        AlertDialog({ editTime = false }, title = { Text("Время операции") }, text = { TimePicker(picker) }, confirmButton = { TextButton({ createdAt = currentDateTime.toLocalDate().atTime(picker.hour, picker.minute).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(); editTime = false }) { Text("Готово") } }, dismissButton = { TextButton({ editTime = false }) { Text("Отмена") } })
+        AlertDialog({ editTime = false }, title = { Text(tr("Время операции", "Operation time")) }, text = { TimePicker(picker) }, confirmButton = { TextButton({ createdAt = currentDateTime.toLocalDate().atTime(picker.hour, picker.minute).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(); editTime = false }) { Text(tr("Готово", "Done")) } }, dismissButton = { TextButton({ editTime = false }) { Text(tr("Отмена", "Cancel")) } })
     }
-    if (confirmDelete) AlertDialog({ confirmDelete = false }, title = { Text("Удалить операцию?") }, text = { Text("Операция и прикреплённая фотография будут удалены без возможности восстановления.") }, confirmButton = { TextButton(onDelete) { Text("Удалить", color = MaterialTheme.colorScheme.error) } }, dismissButton = { TextButton({ confirmDelete = false }) { Text("Отмена") } })
+    if (confirmDelete) AlertDialog({ confirmDelete = false }, title = { Text(tr("Удалить операцию?", "Delete operation?")) }, text = { Text(tr("Операция и прикреплённая фотография будут удалены без возможности восстановления.", "The operation and attached photo will be permanently deleted.")) }, confirmButton = { TextButton(onDelete) { Text(tr("Удалить", "Delete"), color = MaterialTheme.colorScheme.error) } }, dismissButton = { TextButton({ confirmDelete = false }) { Text(tr("Отмена", "Cancel")) } })
     if (showPhoto && expense.photoPath.isNotBlank()) {
         val context = LocalContext.current
         Dialog(onDismissRequest = { showPhoto = false }, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
@@ -470,9 +533,9 @@ private fun ExpenseDetailDialog(
                     Row(Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(12.dp)) {
                         TextButton({
                             val saved = saveExpensePhotoToGallery(context, File(expense.photoPath))
-                            Toast.makeText(context, if (saved) "Фотография сохранена" else "Не удалось сохранить фотографию", Toast.LENGTH_SHORT).show()
-                        }) { Text("Сохранить", color = Color.White) }
-                        TextButton({ showPhoto = false }) { Text("Закрыть", color = Color.White) }
+                            Toast.makeText(context, if (saved) photoSavedText else photoSaveErrorText, Toast.LENGTH_SHORT).show()
+                        }) { Text(tr("Сохранить", "Save"), color = Color.White) }
+                        TextButton({ showPhoto = false }) { Text(tr("Закрыть", "Close"), color = Color.White) }
                     }
                 }
             }
@@ -480,7 +543,7 @@ private fun ExpenseDetailDialog(
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 private fun EntryPanel(
     calculator: CalculatorState,
@@ -500,6 +563,7 @@ private fun EntryPanel(
     onCategorySelected: (Category) -> Unit,
     onMoveCategory: (Category, Int) -> Unit,
     hapticsEnabled: Boolean,
+    showCategoryEmoji: Boolean,
     onDigit: (Char) -> Unit,
     onDecimal: () -> Unit,
     onOperation: (Char) -> Unit,
@@ -513,6 +577,7 @@ private fun EntryPanel(
     val keyboardController = LocalSoftwareKeyboardController.current
     val editorScope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
+    var transferAccountSheetOpen by remember { mutableStateOf(false) }
     fun feedback() { if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove) }
     fun closeTitleEditor() {
         keyboardController?.hide()
@@ -534,49 +599,72 @@ private fun EntryPanel(
     }
     Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer), elevation = CardDefaults.cardElevation(8.dp)) {
         Column {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                listOf(TransactionType.EXPENSE to "Расход", TransactionType.INCOME to "Доход", TransactionType.TRANSFER to "Перевод").forEach { (type, label) ->
-                    val shape = RoundedCornerShape(14.dp)
-                    Text(label, Modifier.weight(1f).clip(shape).background(if (type == transactionType) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh).clickable { onTransactionTypeChange(type) }.padding(vertical = 8.dp), textAlign = TextAlign.Center, fontWeight = if (type == transactionType) FontWeight.SemiBold else FontWeight.Normal)
-                }
+            var typeMenuOpen by remember { mutableStateOf(false) }
+            Box(
+                Modifier.fillMaxWidth().height(20.dp).pointerInput(titleEditorVisible) {
+                    var dragDistance = 0f
+                    detectVerticalDragGestures(
+                        onDragStart = { dragDistance = 0f },
+                        onVerticalDrag = { change, amount -> change.consume(); if (amount > 0f) dragDistance += amount },
+                        onDragEnd = { if (dragDistance > 28f) collapseCalculator() },
+                    )
+                },
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(Modifier.width(36.dp).height(4.dp).clip(RoundedCornerShape(2.dp)).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .35f)))
             }
-            Row(Modifier.fillMaxWidth().padding(start = 12.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (transactionType == TransactionType.TRANSFER) {
-                    var transferMenu by remember { mutableStateOf(false) }
-                    Box(Modifier.weight(1f)) {
-                        val target = accounts.firstOrNull { it.id == transferAccountId }
-                        Text(target?.let { "На счёт: ${it.name}" } ?: "Выбрать счёт назначения", Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.secondaryContainer).clickable { transferMenu = true }.padding(12.dp))
-                        DropdownMenu(transferMenu, { transferMenu = false }) {
-                            accounts.filter { it.id != selectedAccount?.id }.forEach { account ->
-                                DropdownMenuItem(
-                                    text = { Column { Text(account.name); Text(formatMoney(account.currentBalance(expenses)), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp) } },
-                                    onClick = { onTransferAccountSelected(account); transferMenu = false },
-                                )
-                            }
+            Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 6.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box {
+                    val typeLabel = when (transactionType) { TransactionType.EXPENSE -> tr("Расход", "Expense"); TransactionType.INCOME -> tr("Доход", "Income"); TransactionType.TRANSFER -> tr("Перевод", "Transfer") }
+                    Text("$typeLabel  ▾", Modifier.clip(RoundedCornerShape(14.dp)).background(MaterialTheme.colorScheme.primaryContainer).clickable { typeMenuOpen = true }.padding(horizontal = 14.dp, vertical = 9.dp), fontWeight = FontWeight.SemiBold)
+                    DropdownMenu(typeMenuOpen, { typeMenuOpen = false }) {
+                        listOf(TransactionType.EXPENSE to tr("Расход", "Expense"), TransactionType.INCOME to tr("Доход", "Income"), TransactionType.TRANSFER to tr("Перевод", "Transfer")).forEach { (type, label) ->
+                            DropdownMenuItem(text = { Text(label, fontWeight = if (type == transactionType) FontWeight.SemiBold else FontWeight.Normal) }, onClick = { onTransactionTypeChange(type); typeMenuOpen = false })
                         }
                     }
-                } else Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) { categories.forEach { category -> CategoryChip(category, category.id == selectedCategory?.id, { onCategorySelected(category); feedback() }, { direction -> onMoveCategory(category, direction); feedback() }) } }
-                IconButton(::collapseCalculator) { Icon(Icons.Default.KeyboardArrowDown, "Скрыть калькулятор") }
+                }
+                androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
+                IconButton(::collapseCalculator) { Icon(Icons.Default.KeyboardArrowDown, tr("Скрыть калькулятор", "Hide calculator")) }
             }
-            Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 3.dp), horizontalAlignment = Alignment.End) {
-                Text(calculator.expression.replace('.', ','), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 14.sp, maxLines = 1)
-                Row(verticalAlignment = Alignment.Bottom) { Text(calculator.display.replace('.', ','), fontSize = 32.sp, fontWeight = FontWeight.Medium, maxLines = 1); Text(" ₽", fontSize = 19.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 4.dp)) }
+            Row(Modifier.fillMaxWidth().padding(start = 12.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (transactionType == TransactionType.TRANSFER) {
+                    Box(Modifier.weight(1f)) {
+                        val target = accounts.firstOrNull { it.id == transferAccountId }
+                        Text(target?.let { tr("На счёт: ${it.name}", "To account: ${it.name}") } ?: tr("Выбрать счёт назначения", "Choose destination account"), Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.secondaryContainer).clickable { transferAccountSheetOpen = true }.padding(12.dp))
+                    }
+                } else Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) { categories.forEach { category -> CategoryChip(category, category.id == selectedCategory?.id, showCategoryEmoji, { onCategorySelected(category); feedback() }, { direction -> onMoveCategory(category, direction); feedback() }) } }
             }
             if (titleEditorVisible) {
                 OutlinedTextField(
                     value = quickTitle,
                     onValueChange = onQuickTitleChange,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp).focusRequester(titleFocusRequester),
-                    label = { Text("Название операции") },
+                    label = { Text(tr("Название операции", "Operation name")) },
                     singleLine = true,
                     shape = RoundedCornerShape(16.dp),
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
                     keyboardActions = KeyboardActions(onDone = { closeTitleEditor() }),
-                    trailingIcon = { IconButton({ closeTitleEditor() }) { Icon(Icons.Default.Close, "Готово") } },
+                    trailingIcon = { IconButton({ closeTitleEditor() }) { Icon(Icons.Default.Close, tr("Готово", "Done")) } },
                 )
             } else {
-                TextButton({ onTitleEditorVisibleChange(true) }, Modifier.padding(horizontal = 10.dp)) {
-                    Text(if (quickTitle.isBlank()) "+ Название операции" else quickTitle, maxLines = 1)
+                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(
+                        onClick = { onTitleEditorVisibleChange(true) },
+                        modifier = Modifier.width(124.dp),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+                    ) {
+                        Text(
+                            if (quickTitle.isBlank()) tr("+ Название", "+ Name") else quickTitle,
+                            modifier = Modifier.fillMaxWidth(),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            textAlign = TextAlign.Start,
+                        )
+                    }
+                    Column(Modifier.weight(1f), horizontalAlignment = Alignment.End) {
+                        Text(calculator.expression.replace('.', ','), modifier = Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.End)
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.End) { Text(calculator.display.replace('.', ','), modifier = Modifier.weight(1f, fill = false), fontSize = 32.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis); Text(" ₽", fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 4.dp)) }
+                    }
                 }
             }
             if (!titleEditorVisible) {
@@ -598,18 +686,44 @@ private fun EntryPanel(
                     }
                     val shape = RoundedCornerShape(16.dp)
                     Box(
-                        Modifier.weight(1f).height(88.dp).padding(3.dp).clip(shape)
+                        Modifier.weight(1f).height(104.dp).padding(3.dp).clip(shape)
                             .background(MaterialTheme.colorScheme.primary)
                             .combinedClickable(enabled = calculator.amountCents() != null, onClick = { feedback(); onAdd() }, onLongClick = { feedback(); onChooseDay() }),
                         contentAlignment = Alignment.Center,
-                    ) { Icon(Icons.AutoMirrored.Filled.ArrowForward, "Добавить операцию", tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(27.dp)) }
+                    ) { Icon(Icons.AutoMirrored.Filled.ArrowForward, tr("Добавить операцию", "Add operation"), tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(27.dp)) }
+                }
+            }
+        }
+    }
+    if (transferAccountSheetOpen) ModalBottomSheet(onDismissRequest = { transferAccountSheetOpen = false }) {
+        Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 28.dp)) {
+            Text(tr("Счёт назначения", "Destination account"), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+            Text(tr("Выберите счёт, на который переводите деньги", "Choose the account receiving the transfer"), color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp, bottom = 12.dp))
+            accounts.filter { it.id != selectedAccount?.id }.forEach { account ->
+                val selected = account.id == transferAccountId
+                Surface(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(18.dp)).clickable {
+                        onTransferAccountSelected(account)
+                        transferAccountSheetOpen = false
+                    },
+                    shape = RoundedCornerShape(18.dp),
+                    color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
+                ) {
+                    Row(Modifier.padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(12.dp).background(if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline, CircleShape))
+                        Text(account.name, Modifier.padding(start = 12.dp).weight(1f), fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(formatMoney(account.currentBalance(expenses)), fontWeight = FontWeight.SemiBold)
+                            Text(tr("Доступно", "Available"), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
                 }
             }
         }
     }
 }
 
-@Composable private fun CategoryChip(category: Category, selected: Boolean, onClick: () -> Unit, onMove: (Int) -> Unit) {
+@Composable private fun CategoryChip(category: Category, selected: Boolean, showEmoji: Boolean, onClick: () -> Unit, onMove: (Int) -> Unit) {
     val shape = RoundedCornerShape(16.dp)
     Column(
         Modifier.clip(shape).background(if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
@@ -625,9 +739,9 @@ private fun EntryPanel(
             }
             .clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-    ) { Text(category.emoji, fontSize = 17.sp); Text(category.name, fontSize = 11.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal) }
+    ) { if (showEmoji) Text(category.emoji, fontSize = 17.sp); Text(category.name, fontSize = if (showEmoji) 11.sp else 13.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal) }
 }
-@Composable private fun CalculatorKey(label: String, modifier: Modifier, fontSize: Int = 20, onClick: () -> Unit) { val shape = RoundedCornerShape(16.dp); Box(modifier.height(44.dp).padding(3.dp).clip(shape).background(MaterialTheme.colorScheme.surfaceContainerHigh).clickable(onClick = onClick), contentAlignment = Alignment.Center) { Text(label, fontSize = fontSize.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center) } }
+@Composable private fun CalculatorKey(label: String, modifier: Modifier, fontSize: Int = 20, onClick: () -> Unit) { val shape = RoundedCornerShape(16.dp); Box(modifier.height(52.dp).padding(3.dp).clip(shape).background(MaterialTheme.colorScheme.surfaceContainerHigh).clickable(onClick = onClick), contentAlignment = Alignment.Center) { Text(label, fontSize = fontSize.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center) } }
 
 private class ZoomablePhotoView(context: Context) : ImageView(context) {
     private val transform = Matrix()

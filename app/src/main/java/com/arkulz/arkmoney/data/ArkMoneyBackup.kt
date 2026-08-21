@@ -44,15 +44,22 @@ object ArkMoneyBackup {
                 require(!entry.isDirectory && !entry.name.contains("..") && !entry.name.startsWith('/')) { "Некорректный путь в архиве" }
                 require(entry.name !in entries) { "Повторяющийся файл в архиве" }
                 val data = ByteArrayOutputStream()
-                zip.copyTo(data)
-                require(data.size() <= 15_000_000) { "Слишком большой файл в архиве" }
+                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                var entryBytes = 0
+                while (true) {
+                    val read = zip.read(buffer)
+                    if (read < 0) break
+                    entryBytes += read
+                    require(entryBytes <= 15_000_000) { "Слишком большой файл в архиве" }
+                    data.write(buffer, 0, read)
+                }
                 totalBytes += data.size(); require(totalBytes <= 300_000_000 && entries.size < 20_000) { "Резервная копия слишком большая" }
                 entries[entry.name] = data.toByteArray()
                 zip.closeEntry()
             }
         }
         val manifest = entries["manifest.txt"]?.decodeToString() ?: error("Это не резервная копия ArkMoney")
-        require(manifest.startsWith("ArkMoneyBackup\n") && manifest.contains("version=$FORMAT_VERSION")) { "Неподдерживаемая версия резервной копии" }
+        require(manifest == "ArkMoneyBackup\nversion=$FORMAT_VERSION\n") { "Неподдерживаемая версия резервной копии" }
         val accounts = lines(entries, "accounts.tsv").map { fields ->
             require(fields.size == 5); Account(fields[0].toLong(), decoded(fields[1]), fields[2].toLong(), fields[3].toInt(), fields[4].toBooleanStrict())
         }
@@ -63,7 +70,10 @@ object ArkMoneyBackup {
         val expenses = lines(entries, "operations.tsv").map { fields ->
             require(fields.size == 12)
             val id = fields[0].toLong()
-            if (fields[11].isNotBlank()) photoEntries[id] = entries[fields[11]] ?: error("В резервной копии отсутствует фотография")
+            if (fields[11].isNotBlank()) {
+                require(fields[11] == "photos/$id.jpg") { "Некорректная ссылка на фотографию" }
+                photoEntries[id] = entries[fields[11]] ?: error("В резервной копии отсутствует фотография")
+            }
             Expense(
                 id = id,
                 amountCents = fields[1].toLong(),
@@ -87,6 +97,8 @@ object ArkMoneyBackup {
         require(expenses.all { it.accountId in accountIds && (it.transferAccountId == null || it.transferAccountId in accountIds) }) { "Операция ссылается на неизвестный счёт" }
         require(expenses.all { it.transactionType == TransactionType.TRANSFER || it.categoryId in categoryIds }) { "Операция ссылается на неизвестную категорию" }
         require(expenses.filter { it.transactionType == TransactionType.TRANSFER }.all { it.transferAccountId != null && it.transferAccountId != it.accountId }) { "Некорректный перевод" }
+        val allowedEntries = setOf("manifest.txt", "accounts.tsv", "categories.tsv", "operations.tsv") + photoEntries.keys.map { "photos/$it.jpg" }
+        require(entries.keys.all { it in allowedEntries }) { "Неизвестный файл в резервной копии" }
         return BackupArchive(accounts, categories, expenses, photoEntries)
     }
 

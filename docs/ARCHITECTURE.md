@@ -19,6 +19,9 @@ private application files store attached expense photos.
 three primary UI areas. `Theme.kt` applies Material 3 dynamic colors on Android
 12 and newer with static fallback schemes.
 
+`AppLanguage.kt` provides the persisted device/Russian/English language choice
+to Compose without changing stored user category or account names.
+
 ## Persistence
 
 `data/ArkMoneyDatabase.kt` defines the Room database `arkmoney.db` and its
@@ -66,7 +69,8 @@ archive size before Room is modified.
 ## Verification boundaries
 
 Local JVM tests cover calculator behavior, financial isolation, period logic,
-search, formatting, Excel round trips and demo generation. Android lint checks
+analytics summaries, search, formatting, Excel round trips, backup validation
+and demo generation. Android lint checks
 platform and Compose integration. Room migrations, document pickers, photo
 handling, adaptive icon masks and full UI flows still require manual testing on
 an isolated emulator or disposable test installation.

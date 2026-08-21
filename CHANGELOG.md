@@ -2,6 +2,33 @@
 
 All notable changes to ArkMoney are documented in this file.
 
+## 0.4.0 — 2026-08-21
+
+### Added / Добавлено
+
+- selectable Russian, English and device-language interfaces / выбор русского,
+  английского языка или языка устройства;
+- swipe-up calculator opening, scroll-to-hide behavior and Android Back handling /
+  открытие калькулятора свайпом, скрытие при прокрутке и обработка кнопки «Назад»;
+- Snackbar undo after adding an operation / быстрая отмена новой операции;
+- analytics summary for income, expenses, net result, comparison and projection /
+  сводка аналитики по доходам, расходам, итогу, сравнению и прогнозу;
+- optional category emoji visibility in the calculator / настройка отображения
+  эмодзи категорий в калькуляторе.
+
+### Changed / Изменено
+
+- transaction type selection is now a compact Material 3 menu / выбор типа
+  операции перенесён в компактное меню Material 3;
+- operation name action shares the amount row and calculator keys are larger /
+  кнопка названия расположена рядом с суммой, клавиши калькулятора увеличены;
+- the account chooser is a balance-aware Material 3 bottom sheet / выбор счёта
+  переделан в Material 3 панель с балансами;
+- category deletion can explicitly remove linked operations and photos / категория
+  может быть удалена вместе со связанными операциями и фотографиями;
+- `.arkmoney` restore rejects oversized, unknown and unreferenced archive entries /
+  восстановление `.arkmoney` отклоняет лишние и некорректные элементы архива.
+
 ## 0.3.0 — 2026-08-18
 
 ### Added / Добавлено
