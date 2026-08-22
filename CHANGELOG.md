@@ -2,6 +2,21 @@
 
 All notable changes to ArkMoney are documented in this file.
 
+## 0.4.1 — 2026-08-22
+
+### Changed / Изменено
+
+- the calculator now follows the finger while opening and closing, then settles
+  smoothly to the nearest state / калькулятор следует за пальцем при открытии и
+  закрытии, а после отпускания плавно завершает движение;
+- the operation-added Snackbar uses the active Material 3 theme, larger rounded
+  corners and is displayed above the calculator for three seconds / уведомление
+  о добавлении операции использует активную тему Material 3, крупное скругление
+  и показывается над калькулятором в течение трёх секунд;
+- a newly added operation is reliably brought into view, including the first
+  operation of a new day / новая операция всегда появляется в области просмотра,
+  включая первую операцию нового дня.
+
 ## 0.4.0 — 2026-08-21
 
 ### Added / Добавлено

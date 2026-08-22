@@ -13,7 +13,8 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.FileProvider
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -66,6 +67,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TimePicker
@@ -74,12 +76,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -95,6 +101,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
@@ -123,6 +130,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.coroutineScope
 
 @Composable
 fun ExpensesScreen(
@@ -150,8 +158,10 @@ fun ExpensesScreen(
     val historyState = rememberLazyListState()
     val snackbarHostState = remember { SnackbarHostState() }
     var calculator by remember { mutableStateOf(CalculatorState()) }
-    var calculatorVisible by rememberSaveable { mutableStateOf(true) }
-    val calculatorVisibility = remember { MutableTransitionState(true) }
+    var calculatorProgress by rememberSaveable { mutableFloatStateOf(1f) }
+    var calculatorHeightPx by remember { mutableIntStateOf(1) }
+    var calculatorAnimationJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    var pendingScrollExpenseId by remember { mutableStateOf<Long?>(null) }
     var selectedCategoryId by rememberSaveable { mutableStateOf<Long?>(null) }
     var transactionTypeName by rememberSaveable { mutableStateOf(TransactionType.EXPENSE.name) }
     val transactionType = TransactionType.valueOf(transactionTypeName)
@@ -166,13 +176,33 @@ fun ExpensesScreen(
     val haptic = LocalHapticFeedback.current
     var displayedCategories by remember { mutableStateOf(categories) }
     LaunchedEffect(categories) { displayedCategories = categories }
-    LaunchedEffect(calculatorVisible) { calculatorVisibility.targetState = calculatorVisible }
-    BackHandler(calculatorVisible) { calculatorVisible = false }
+    fun settleCalculator(open: Boolean) {
+        calculatorAnimationJob?.cancel()
+        calculatorAnimationJob = scope.launch {
+            animate(
+                initialValue = calculatorProgress,
+                targetValue = if (open) 1f else 0f,
+                animationSpec = spring(dampingRatio = .86f, stiffness = 430f),
+            ) { value, _ -> calculatorProgress = value.coerceIn(0f, 1f) }
+        }
+    }
+    fun dragCalculator(amount: Float) {
+        calculatorAnimationJob?.cancel()
+        calculatorProgress = (calculatorProgress - amount / calculatorHeightPx).coerceIn(0f, 1f)
+    }
+    BackHandler(calculatorProgress > .01f) { settleCalculator(false) }
     val visibleCategories = displayedCategories.filter { it.type == transactionType.name }
     val selectedCategory = visibleCategories.firstOrNull { it.id == selectedCategoryId }
         ?: visibleCategories.firstOrNull().also { selectedCategoryId = it?.id }
     val allAccountExpenses = expenses.filter { it.accountId == selectedAccount?.id || it.transferAccountId == selectedAccount?.id }
     val accountExpenses = allAccountExpenses.filter { expense -> expense.matchesQuery(searchQuery, categories.firstOrNull { it.id == expense.categoryId }) }
+    LaunchedEffect(accountExpenses, pendingScrollExpenseId) {
+        val pendingId = pendingScrollExpenseId ?: return@LaunchedEffect
+        if (accountExpenses.any { it.id == pendingId }) {
+            historyState.scrollToItem(0)
+            pendingScrollExpenseId = null
+        }
+    }
     val photoLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         val expense = selectedExpense
         if (uri != null && expense != null) scope.launch {
@@ -209,10 +239,14 @@ fun ExpensesScreen(
         val date = LocalDate.now().minusDays(daysAgo.toLong())
         val timestamp = date.atTime(LocalTime.now()).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
         onAddExpense(cents, category, quickTitle.trim(), timestamp, transactionType, destination) { createdId ->
+            pendingScrollExpenseId = createdId
             scope.launch {
-                historyState.animateScrollToItem(0)
-                val result = snackbarHostState.showSnackbar(operationAddedText, undoText, withDismissAction = true)
-                if (result == SnackbarResult.ActionPerformed) onUndoExpense(createdId)
+                coroutineScope {
+                    val dismissJob = launch { delay(3_000); snackbarHostState.currentSnackbarData?.dismiss() }
+                    val result = snackbarHostState.showSnackbar(operationAddedText, undoText, withDismissAction = true, duration = SnackbarDuration.Indefinite)
+                    dismissJob.cancel()
+                    if (result == SnackbarResult.ActionPerformed) onUndoExpense(createdId)
+                }
             }
         }
         if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -227,9 +261,39 @@ fun ExpensesScreen(
             searchVisible = it
             if (!it) searchQuery = ""
         }
-        ExpenseHistory(accountExpenses, categories, Modifier.weight(1f), historyState, searchVisible, dailyLimitCents, onUserScroll = { calculatorVisible = false }, onExpenseClick = { selectedExpense = it })
-        AnimatedVisibility(visibleState = calculatorVisibility) {
-            EntryPanel(
+        Box(Modifier.weight(1f)) {
+            ExpenseHistory(accountExpenses, categories, Modifier.fillMaxSize(), historyState, searchVisible, dailyLimitCents, onUserScroll = { settleCalculator(false) }, onExpenseClick = { selectedExpense = it })
+            SnackbarHost(
+                hostState = snackbarHostState,
+                modifier = Modifier.align(Alignment.BottomCenter).padding(horizontal = 14.dp, vertical = 10.dp),
+            ) { data ->
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(24.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                    tonalElevation = 6.dp,
+                    shadowElevation = 4.dp,
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(start = 18.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(data.visuals.message, Modifier.weight(1f), maxLines = 2)
+                        data.visuals.actionLabel?.let { label ->
+                            TextButton(onClick = data::performAction) { Text(label, color = MaterialTheme.colorScheme.primary) }
+                        }
+                        IconButton(onClick = data::dismiss, modifier = Modifier.size(44.dp)) {
+                            Icon(Icons.Default.Close, tr("Закрыть уведомление", "Dismiss notification"))
+                        }
+                    }
+                }
+            }
+        }
+        Box(Modifier.fillMaxWidth()) {
+            CalculatorReveal(calculatorProgress) {
+                EntryPanel(
+                modifier = Modifier.onSizeChanged { calculatorHeightPx = it.height.coerceAtLeast(1) },
                 calculator = calculator,
                 categories = visibleCategories,
                 accounts = accounts,
@@ -257,24 +321,28 @@ fun ExpensesScreen(
                 onOperation = { calculator = calculator.pressOperation(it) },
                 onClear = { calculator = CalculatorState() },
                 onBackspace = { calculator = calculator.pressBackspace() },
-                onCollapse = { calculatorVisible = false },
+                onCollapse = { settleCalculator(false) },
+                onDrag = ::dragCalculator,
+                onDragEnd = { settleCalculator(calculatorProgress >= .72f) },
                 onAdd = { save(0) },
                 onChooseDay = { chooseExpenseDay = true },
-            )
-        }
-        if (calculatorVisibility.isIdle && !calculatorVisibility.currentState && !calculatorVisibility.targetState) {
-            Surface(Modifier.fillMaxWidth().pointerInput(Unit) {
-                var drag = 0f
-                detectVerticalDragGestures(onVerticalDrag = { change, amount -> change.consume(); drag += amount }, onDragEnd = { if (drag < -24f) calculatorVisible = true })
-            }.clickable { calculatorVisible = true }, color = MaterialTheme.colorScheme.surfaceContainer, tonalElevation = 3.dp) {
+                )
+            }
+            if (calculatorProgress < .999f) {
+                Surface(Modifier.align(Alignment.BottomCenter).fillMaxWidth().graphicsLayer { alpha = (1f - calculatorProgress).coerceIn(0f, 1f) }.pointerInput(Unit) {
+                detectVerticalDragGestures(
+                    onVerticalDrag = { change, amount -> change.consume(); dragCalculator(amount) },
+                    onDragEnd = { settleCalculator(calculatorProgress >= .12f) },
+                )
+            }.clickable { settleCalculator(true) }, color = MaterialTheme.colorScheme.surfaceContainer, tonalElevation = 3.dp) {
                 Row(Modifier.padding(horizontal = 20.dp, vertical = 10.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.KeyboardArrowUp, null)
                     Text(tr("Открыть калькулятор", "Open calculator"), Modifier.padding(start = 6.dp), fontWeight = FontWeight.Medium)
                 }
+                }
             }
         }
       }
-      SnackbarHost(snackbarHostState, Modifier.align(Alignment.BottomCenter).padding(bottom = if (calculatorVisible) 12.dp else 52.dp))
     }
     if (chooseExpenseDay) {
         AlertDialog(
@@ -546,6 +614,7 @@ private fun ExpenseDetailDialog(
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 private fun EntryPanel(
+    modifier: Modifier = Modifier,
     calculator: CalculatorState,
     categories: List<Category>,
     accounts: List<Account>,
@@ -570,6 +639,8 @@ private fun EntryPanel(
     onClear: () -> Unit,
     onBackspace: () -> Unit,
     onCollapse: () -> Unit,
+    onDrag: (Float) -> Unit,
+    onDragEnd: () -> Unit,
     onAdd: () -> Unit,
     onChooseDay: () -> Unit,
 ) {
@@ -597,16 +668,14 @@ private fun EntryPanel(
             keyboardController?.show()
         }
     }
-    Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer), elevation = CardDefaults.cardElevation(8.dp)) {
+    Card(modifier.fillMaxWidth(), shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer), elevation = CardDefaults.cardElevation(8.dp)) {
         Column {
             var typeMenuOpen by remember { mutableStateOf(false) }
             Box(
                 Modifier.fillMaxWidth().height(20.dp).pointerInput(titleEditorVisible) {
-                    var dragDistance = 0f
                     detectVerticalDragGestures(
-                        onDragStart = { dragDistance = 0f },
-                        onVerticalDrag = { change, amount -> change.consume(); if (amount > 0f) dragDistance += amount },
-                        onDragEnd = { if (dragDistance > 28f) collapseCalculator() },
+                        onVerticalDrag = { change, amount -> change.consume(); onDrag(amount) },
+                        onDragEnd = onDragEnd,
                     )
                 },
                 contentAlignment = Alignment.Center,
@@ -719,6 +788,20 @@ private fun EntryPanel(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun CalculatorReveal(progress: Float, content: @Composable () -> Unit) {
+    Layout(
+        content = content,
+        modifier = Modifier.fillMaxWidth().clip(androidx.compose.ui.graphics.RectangleShape),
+    ) { measurables, constraints ->
+        val placeable = measurables.single().measure(constraints.copy(minHeight = 0))
+        val visibleHeight = (placeable.height * progress.coerceIn(0f, 1f)).toInt()
+        layout(placeable.width, visibleHeight) {
+            placeable.placeRelative(0, 0)
         }
     }
 }
