@@ -275,7 +275,7 @@ fun SettingsScreen(
                 if (File(context.filesDir, "last_before_restore.arkmoney").isFile) TextButton({ scope.launch { withContext(Dispatchers.IO) { runCatching { File(context.filesDir, "last_before_restore.arkmoney").inputStream().use(ArkMoneyBackup::read) } }.onSuccess { pendingBackup = it }.onFailure { Toast.makeText(context, safetyBackupErrorText, Toast.LENGTH_LONG).show() } } }) { Text(tr("Отменить последнее восстановление", "Undo last restore")) }
             }
         }
-        item { Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) { TextButton({ uriHandler.openUri("https://github.com/ejevgg/ArkMoney") }) { Text("GitHub") }; Text("ArkMoney 0.4.0", Modifier.clickable { val next = nextVersionTap(versionTaps); versionTaps = next.first; showTesting = next.second }.padding(vertical = 12.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center) } }
+        item { Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) { TextButton({ uriHandler.openUri("https://github.com/ejevgg/ArkMoney") }) { Text("GitHub") }; Text("ArkMoney 0.4.1", Modifier.clickable { val next = nextVersionTap(versionTaps); versionTaps = next.first; showTesting = next.second }.padding(vertical = 12.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center) } }
     }
 
     val editingCategory = categoryEditor

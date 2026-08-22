@@ -18,8 +18,10 @@
   or the day before yesterday. Live preview makes a separate Equals key unnecessary.
 - A separate name action reveals a focused text field and the system keyboard.
 - Android Back closes the built-in calculator first. Scrolling the history down
-  hides it; tapping its compact control or swiping upward opens it again.
-- A saved operation is brought into view and can be undone from a short Snackbar.
+  hides it; tapping its compact control or swiping upward opens it again. During
+  a direct gesture the calculator follows the finger and settles smoothly.
+- A saved operation is brought into view and can be undone from a Snackbar shown
+  above the calculator for three seconds.
 - Expenses are grouped by local calendar day.
 - A custom expense name replaces the category name in the list.
 - Tapping an expense opens its card with name, description and photo controls.
